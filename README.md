@@ -1,8 +1,8 @@
 # Paintify for TouchDesigner
 
 This repository contains the standalone GPU renderer and a TouchDesigner
-component. For TouchDesigner users, download the single `Paintify.tox` release
-asset, drag it into a Network Editor, and connect any TOP to its input. The TOX
+component. For TouchDesigner users, download [Paintify.tox](Paintify.tox) from
+the repository root, drag it into a Network Editor, and connect any TOP to its input. The TOX
 bundles the renderer, DLLs, and shaders; no source checkout or build is needed.
 See [Paintify component setup](touchdesigner/README.md) for controls and limits.
 

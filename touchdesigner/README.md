@@ -6,7 +6,7 @@ TouchDesigner through Spout.
 
 ## For users: one-file install
 
-Download **Paintify.tox** from the GitHub release, then drag it into the
+Download [Paintify.tox](../Paintify.tox) from the repository root, then drag it into the
 TouchDesigner Network Editor. Connect any TOP to its input and connect its
 output to a viewer or another TOP. The TOX contains the renderer executable,
 its runtime DLLs, and its shaders. On first use it extracts them to
