@@ -132,9 +132,12 @@ def install():
     source = comp.create('inTOP', 'source')
     send = comp.create('syphonspoutoutTOP', 'send_to_paintify')
     receive = comp.create('syphonspoutinTOP', 'painted_from_paintify')
+    upright = comp.create('flipTOP', 'upright_output')
     result = comp.create('outTOP', 'painted')
     source.outputConnectors[0].connect(send.inputConnectors[0])
-    receive.outputConnectors[0].connect(result.inputConnectors[0])
+    receive.outputConnectors[0].connect(upright.inputConnectors[0])
+    upright.outputConnectors[0].connect(result.inputConnectors[0])
+    upright.par.flipy = True
     send.par.active = True
     send.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[0]"
     receive.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[1]"
@@ -142,7 +145,8 @@ def install():
     source.nodeX, source.nodeY = 0, 0
     send.nodeX, send.nodeY = 200, 0
     receive.nodeX, receive.nodeY = 400, 0
-    result.nodeX, result.nodeY = 600, 0
+    upright.nodeX, upright.nodeY = 600, 0
+    result.nodeX, result.nodeY = 800, 0
 
     runtime = comp.create('textDAT', 'paintify_runtime')
     runtime.text = RUNTIME

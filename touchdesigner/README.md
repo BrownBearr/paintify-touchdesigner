@@ -8,7 +8,7 @@ TouchDesigner through Spout.
 
 Download [Paintify.tox](../Paintify.tox) from the repository root, then drag it into the
 TouchDesigner Network Editor. Connect any TOP to its input and connect its
-output to a viewer or another TOP. The TOX contains the renderer executable,
+output to a viewer or another TOP. The component flips the returned Spout texture vertically so the painted output matches the input orientation. The TOX contains the renderer executable,
 its runtime DLLs, and its shaders. On first use it extracts them to
 `%LOCALAPPDATA%\Paintify\<bundle-id>`; no compiler, vcpkg, source checkout,
 or separate Paintify installer is needed. The Windows VC++ runtime must
