@@ -69,11 +69,12 @@ def _append_numeric(args, comp, parameter, flag):
         args.extend((flag, str(value)))
 
 
-def renderer_args(comp, exe, stopfile):
+def renderer_args(comp, exe, stopfile, settingsfile):
     incoming, outgoing = names(comp)
     args = [str(exe), '--live-spout', '--spout-in', incoming,
             '--spout-out', outgoing, '--live-stop-file', str(stopfile),
             '--live-parent-pid', str(os.getpid()),
+            '--live-settings-file', str(settingsfile),
             '--target-fps', str(comp.par.Fps.eval()),
             '--preset', str(comp.par.Preset.eval())]
     for parameter, flag in (
@@ -118,11 +119,29 @@ def renderer_args(comp, exe, stopfile):
     return args
 
 
+def _write_settings(settingsfile, args):
+    # One argument per line; atomic replace prevents the renderer reading half a change.
+    temporary = settingsfile.with_name(settingsfile.name + '.tmp')
+    temporary.write_text('\n'.join(args[1:]) + '\n', encoding='utf-8')
+    os.replace(temporary, settingsfile)
+
+
+def update(comp):
+    entry = _registry().get(comp.id)
+    override = comp.par.Executable.eval().strip()
+    if (entry is None or entry[0].poll() is not None
+            or not comp.par.Active.eval() or entry[4] != override):
+        start(comp)
+        return
+    proc, log, stopfile, settingsfile, _old_override = entry
+    args = renderer_args(comp, proc.args[0], stopfile, settingsfile)
+    _write_settings(settingsfile, args)
+
 def stop_id(comp_id):
     entry = _registry().pop(comp_id, None)
     if entry is None:
         return
-    proc, log, stopfile = entry
+    proc, log, stopfile, settingsfile, _override = entry
     if proc.poll() is None:
         stopfile.write_text('stop', encoding='utf-8')
         try:
@@ -136,6 +155,8 @@ def stop_id(comp_id):
     log.close()
     if stopfile.exists():
         stopfile.unlink()
+    if settingsfile.exists():
+        settingsfile.unlink()
 
 
 def stop(comp):
@@ -161,10 +182,15 @@ def start(comp):
     if not comp.par.Active.eval():
         return
     exe, shader_dir = prepare_runtime(comp)
-    stopfile = exe.parent / ('paintify-stop-' + str(comp.id) + '.flag')
+    control_dir = (exe.parent if shader_dir is not None else
+                   Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / 'Paintify')
+    control_dir.mkdir(parents=True, exist_ok=True)
+    stopfile = control_dir / ('paintify-stop-' + str(comp.id) + '.flag')
+    settingsfile = control_dir / ('paintify-settings-' + str(comp.id) + '.txt')
     if stopfile.exists():
         stopfile.unlink()
-    args = renderer_args(comp, exe, stopfile)
+    args = renderer_args(comp, exe, stopfile, settingsfile)
+    _write_settings(settingsfile, args)
     log_path = exe.parent / 'paintify-live.log'
     log = log_path.open('a', encoding='utf-8')
     env = os.environ.copy()
@@ -178,7 +204,7 @@ def start(comp):
     except Exception:
         log.close()
         raise
-    _registry()[comp.id] = (proc, log, stopfile)
+    _registry()[comp.id] = (proc, log, stopfile, settingsfile, comp.par.Executable.eval().strip())
     if comp.id not in _watchers():
         from td import op, run
         _watchers().add(comp.id)

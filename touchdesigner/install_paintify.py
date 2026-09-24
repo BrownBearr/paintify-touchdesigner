@@ -33,7 +33,7 @@ def onExit():
 PAR_EXECUTE = r'''
 def onValueChange(par, prev):
     comp = parent()
-    comp.op('paintify_runtime').module.start(comp)
+    comp.op('paintify_runtime').module.update(comp)
     return
 '''
 

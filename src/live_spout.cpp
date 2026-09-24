@@ -28,8 +28,10 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
     bool everConnected = false;
     unsigned long long paintedFrames = 0;
     auto lastConnected = std::chrono::steady_clock::now();
-    const auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-        std::chrono::duration<double>(1.0 / std::max(1.0, live.fps)));
+    RenderConfig currentRender = render;
+    double targetFps = live.fps;
+    auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(1.0 / std::max(1.0, targetFps)));
     auto nextFrame = std::chrono::steady_clock::now();
     std::printf("Paintify live: %s -> %s, %.1f fps\n",
                 live.inputName.c_str(), live.outputName.c_str(), live.fps);
@@ -44,6 +46,12 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
         if (now < nextFrame) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
+        }
+        if (live.reloadSettings && live.reloadSettings(params, currentRender, targetFps)) {
+            interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(1.0 / std::max(1.0, targetFps)));
+            havePainting = false;
+            pipe.resetTemporal();
         }
         // Advance from the previous deadline so scheduling jitter does not
         // accumulate and quietly turn a 12 fps request into 11 fps.
@@ -95,7 +103,7 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
         if (!receiver.IsFrameNew()) continue;
 
         if (!pipe.setSourceTexture(inputTexture, width, height)) continue;
-        pipe.render(params, render, havePainting && params.frameDiffThreshold > 0.f);
+        pipe.render(params, currentRender, havePainting && params.frameDiffThreshold > 0.f);
         havePainting = true;
         params.frame += 1.f;
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);

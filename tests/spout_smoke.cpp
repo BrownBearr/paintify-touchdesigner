@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,6 +23,7 @@ int main(int argc, char** argv) {
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return 3;
 
     const bool full = argc > 1 && std::strcmp(argv[1], "--full") == 0;
+    const bool liveSettings = argc > 1 && std::strcmp(argv[1], "--settings") == 0;
     const int W = full ? 1920 : 640;
     const int H = full ? 1080 : 360;
     const int target = full ? 48 : 3;
@@ -48,6 +50,12 @@ int main(int argc, char** argv) {
     std::string cmd = "\"" + renderer + "\" --live-spout --spout-in \"Paintify Smoke Input\" "
         "--spout-out \"Paintify Smoke Output\" --target-fps 12";
     if (full) cmd += " --relax 4";
+    const auto settingsPath = std::filesystem::temp_directory_path()
+        / ("paintify-smoke-settings-" + std::to_string(GetCurrentProcessId()) + ".txt");
+    if (liveSettings) {
+        std::ofstream(settingsPath) << "--preset\nimpressionist\n";
+        cmd += " --live-settings-file \"" + settingsPath.string() + "\"";
+    }
     STARTUPINFOA startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION child{};
@@ -59,12 +67,14 @@ int main(int argc, char** argv) {
 
     int received = 0;
     bool wrongSender = false;
+    bool settingsSent = false;
+    bool settingsApplied = false;
     unsigned char lastSample[4] = {};
     bool haveSample = false;
     int sourceStep = 0;
     std::chrono::steady_clock::time_point firstPainted, lastPainted;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (std::chrono::steady_clock::now() < deadline && received < target) {
+    while (std::chrono::steady_clock::now() < deadline && received < target && !settingsApplied) {
         glfwPollEvents();
         const unsigned char swatch[4] = {
             static_cast<unsigned char>((sourceStep++ * 5) % 256), 60, 210, 255};
@@ -91,12 +101,21 @@ int main(int argc, char** argv) {
                 unsigned char sample[4] = {};
                 glGetTextureSubImage(output, 0, 3*W/4, H/2, 0, 1, 1, 1,
                                      GL_RGBA, GL_UNSIGNED_BYTE, 4, sample);
+                if (liveSettings && settingsSent &&
+                    sample[0] > 245 && sample[1] > 245 && sample[2] > 245)
+                    settingsApplied = true;
                 if (!haveSample || std::memcmp(sample, lastSample, 4) != 0) {
                     std::memcpy(lastSample, sample, 4);
                     haveSample = true;
                     if (received == 0) firstPainted = std::chrono::steady_clock::now();
                     lastPainted = std::chrono::steady_clock::now();
                     ++received;
+                    if (liveSettings && received == 1) {
+                        std::ofstream(settingsPath, std::ios::trunc)
+                            << "--preset\nimpressionist\n--underpaint\nnone\n"
+                               "--opacity\n0\n--relax\n0\n";
+                        settingsSent = true;
+                    }
                 }
             }
         }
@@ -107,6 +126,7 @@ int main(int argc, char** argv) {
     WaitForSingleObject(child.hProcess, 2000);
     CloseHandle(child.hThread);
     CloseHandle(child.hProcess);
+    if (liveSettings) std::filesystem::remove(settingsPath);
     sender.ReleaseSender();
     receiver.ReleaseReceiver();
     if (source) glDeleteTextures(1, &source);
@@ -117,5 +137,5 @@ int main(int argc, char** argv) {
         std::chrono::duration<double>(lastPainted - firstPainted).count() : 0.0;
     std::printf("Received %d painted Spout frames (%.1f fps after startup)\n",
                 received, elapsed > 0.0 ? (received - 1) / elapsed : 0.0);
-    return wrongSender ? 6 : received >= target ? 0 : 5;
+    return wrongSender ? 6 : liveSettings ? (settingsApplied ? 0 : 7) : received >= target ? 0 : 5;
 }

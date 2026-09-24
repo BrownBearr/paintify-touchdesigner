@@ -5,6 +5,7 @@
 
 #include <string>
 #include <cstdint>
+#include <functional>
 
 struct GLFWwindow;
 
@@ -14,6 +15,7 @@ struct LiveSpoutConfig {
     std::string stopFile; // optional per-process shutdown signal
     uint32_t parentPid = 0; // exit if the owning TouchDesigner process exits
     double fps = 12.0;
+    std::function<bool(TuningParams&, RenderConfig&, double&)> reloadSettings;
 };
 
 // Run the live bridge on the GL thread until the window closes.

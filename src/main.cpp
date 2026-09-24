@@ -25,7 +25,10 @@
 #include <cstring>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <sstream>
+#include <iterator>
 #include <vector>
 
 namespace {
@@ -84,6 +87,7 @@ struct Options {
     std::string spoutIn = "Paintify Input";
     std::string spoutOut = "Paintify Output";
     std::string liveStopFile;
+    std::string liveSettingsFile;
     uint32_t liveParentPid = 0;
     double targetFps = 12.0;
     std::string in;
@@ -137,6 +141,7 @@ void usage() {
         "  --spout-out <name>      live output sender name (Paintify Output)\n"
         "  --target-fps <n>        live painted frames per second (12)\n"
         "  --live-stop-file <path> exit live mode when this file appears\n"
+        "  --live-settings-file <path> reload live controls from this file\n"
         "  --live-parent-pid <n>  exit if the owning process closes\n"
         "  --preset <name>         impressionist | expressionist | pointillist |\n"
         "                          wash   (the web's, value for value)\n"
@@ -228,6 +233,7 @@ Options parseArgs(int argc, char** argv) {
         else if (a == "--spout-out")       o.spoutOut = next(i);
         else if (a == "--target-fps")      o.targetFps = atof(next(i));
         else if (a == "--live-stop-file")   o.liveStopFile = next(i);
+        else if (a == "--live-settings-file") o.liveSettingsFile = next(i);
         else if (a == "--live-parent-pid")   o.liveParentPid = uint32_t(std::strtoul(next(i), nullptr, 10));
         else if (a == "--in")              o.in = next(i);
         else if (a == "--out")             o.out = next(i);
@@ -334,6 +340,37 @@ void applyOverrides(const Options& o, TuningParams& p, RenderConfig& cfg,
     p.jitterPerFrame = o.jitterPerFrame ? 1.f : 0.f;
 }
 
+void resolveLook(const Options& opt, TuningParams& params, RenderConfig& cfg,
+                 std::string* radiiText, int* presetIndex) {
+    int selected = 0;
+    applyPreset(kPresets[0], params, cfg, radiiText);
+    if (!opt.preset.empty()) {
+        bool found = false;
+        for (int i = 0; i < kPresetCount; ++i) {
+            if (opt.preset == kPresets[i].name) {
+                selected = i;
+                applyPreset(kPresets[i], params, cfg, radiiText);
+                found = true;
+                break;
+            }
+        }
+        if (!found) fprintf(stderr, "unknown preset '%s'; using impressionist\n",
+                            opt.preset.c_str());
+    }
+    // A saved file sits between a preset and explicit command-line overrides.
+    if (!opt.paramsFile.empty()) {
+        std::string perr;
+        if (!paramfile::load(opt.paramsFile, &params, &cfg, &perr))
+            fprintf(stderr, "%s\n", perr.c_str());
+        else {
+            if (!perr.empty()) fprintf(stderr, "%s: %s\n", opt.paramsFile.c_str(),
+                                       perr.c_str());
+            if (radiiText) *radiiText = radiiToString(cfg.radii);
+        }
+    }
+    applyOverrides(opt, params, cfg, radiiText);
+    if (presetIndex) *presetIndex = selected;
+}
 // Fallback subject when no image is supplied: smooth colour ramps plus a few
 // hard edges, which exercises both the flow field and the stroke termination.
 std::vector<unsigned char> syntheticImage(int w, int h) {
@@ -718,34 +755,7 @@ int main(int argc, char** argv) {
     std::string radiiText = radiiToString(cfg.radii);
 
     int presetIdx = 0;
-    applyPreset(kPresets[0], params, cfg, &radiiText);
-    if (!opt.preset.empty()) {
-        bool found = false;
-        for (int i = 0; i < kPresetCount; ++i) {
-            if (opt.preset == kPresets[i].name) {
-                presetIdx = i;
-                applyPreset(kPresets[i], params, cfg, &radiiText);
-                found = true;
-                break;
-            }
-        }
-        if (!found) fprintf(stderr, "unknown preset '%s'; using impressionist\n",
-                            opt.preset.c_str());
-    }
-    // A saved file sits between the preset and the individual flags: it is a
-    // whole look, so it should replace the preset, but an explicit --threshold
-    // on the same command line is clearly meant to win over both.
-    if (!opt.paramsFile.empty()) {
-        std::string perr;
-        if (!paramfile::load(opt.paramsFile, &params, &cfg, &perr))
-            fprintf(stderr, "%s\n", perr.c_str());
-        else {
-            if (!perr.empty()) fprintf(stderr, "%s: %s\n", opt.paramsFile.c_str(),
-                                       perr.c_str());
-            radiiText = radiiToString(cfg.radii);
-        }
-    }
-    applyOverrides(opt, params, cfg, &radiiText);
+    resolveLook(opt, params, cfg, &radiiText, &presetIdx);
 
     if (opt.liveSpout) {
         LiveSpoutConfig live;
@@ -754,6 +764,41 @@ int main(int argc, char** argv) {
         live.fps = opt.targetFps;
         live.stopFile = opt.liveStopFile;
         live.parentPid = opt.liveParentPid;
+        if (!opt.liveSettingsFile.empty()) {
+            live.reloadSettings = [path = opt.liveSettingsFile,
+                                   previous = std::string{}]
+                                  (TuningParams& current, RenderConfig& config,
+                                   double& fps) mutable -> bool {
+                std::ifstream file(path, std::ios::binary);
+                if (!file) return false;
+                const std::string contents((std::istreambuf_iterator<char>(file)),
+                                           std::istreambuf_iterator<char>());
+                if (contents.empty() || contents == previous) return false;
+                std::vector<std::string> arguments{"gpu-sbr"};
+                std::istringstream lines(contents);
+                std::string value;
+                while (std::getline(lines, value)) {
+                    if (!value.empty() && value.back() == '\r') value.pop_back();
+                    if (!value.empty()) arguments.push_back(value);
+                }
+                std::vector<char*> argv;
+                argv.reserve(arguments.size());
+                for (std::string& argument : arguments)
+                    argv.push_back(argument.data());
+                const Options updated = parseArgs(int(argv.size()), argv.data());
+                TuningParams fresh;
+                RenderConfig freshConfig;
+                resolveLook(updated, fresh, freshConfig, nullptr, nullptr);
+                fresh.frame = current.frame;
+                current = fresh;
+                config = freshConfig;
+                fps = updated.targetFps;
+                previous = contents;
+                std::printf("Paintify live settings updated\n");
+                std::fflush(stdout);
+                return true;
+            };
+        }
         const int result = runLiveSpout(win, pipe, params, cfg, live);
         pipe.shutdown();
         glfwDestroyWindow(win);

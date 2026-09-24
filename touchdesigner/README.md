@@ -19,7 +19,8 @@ The component starts automatically when loaded. If the timeline is paused,
 its startup callback still runs. On exit or component deletion, it stops its
 renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
 Spout support are required. The TOX is Windows-only because the bundled
-renderer is a Windows executable.
+renderer is a Windows executable. A Mac build would need a native GPU
+renderer and Syphon integration; this Windows TOX does not run on macOS.
 
 ## For maintainers: build the TOX
 
@@ -55,8 +56,10 @@ underpaint, painting passes, tensor smoothing, edge tangent flow, bristle
 density, texture taper, dry brush, light angle, jitters, relaxation tuning,
 and optical flow iterations. Numeric advanced controls default to `-1`,
 which leaves the renderer's preset or default intact. Empty radii and
-**Underpaint: Use look** likewise leave the preset intact. Changing a control
-restarts the renderer.
+**Underpaint: Use look** likewise leave the preset intact. Look, FPS, and
+painting controls update the running renderer without restarting it. Toggling
+**Paintify active** or changing the executable override still starts or stops
+the renderer.
 
 CLI-only options for loading/saving files, batch rendering, video encoding,
 and diagnostics are not relevant to a live TOP component.

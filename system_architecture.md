@@ -462,7 +462,11 @@ directory under `%LOCALAPPDATA%/Paintify`, sets `PAINTIFY_SHADER_DIR`, then
 launches the renderer. `gl_util.cpp` honors that shader override and retains
 the source-tree path for standalone development. The Execute DAT's
 `onCreate()` callback starts the renderer when the TOX is loaded; parameter
-changes restart it. Build a release executable in `build-package` so an
+changes atomically replace a small settings file, which the renderer reads
+on its next paint frame. The renderer resolves the preset and overrides again,
+then resets temporal painting without stopping the Spout sender. Only active
+state and executable override changes restart the process. Build a release
+executable in `build-package` so an
 existing `build-live` process does not lock the linker output. Keep the
 repository source; publish the generated TOX as the single user-facing
 GitHub release asset.
