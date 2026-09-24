@@ -138,6 +138,7 @@ def install():
     send.par.active = True
     send.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[0]"
     receive.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[1]"
+    receive.par.usespoutactivesender = False
     source.nodeX, source.nodeY = 0, 0
     send.nodeX, send.nodeY = 200, 0
     receive.nodeX, receive.nodeY = 400, 0

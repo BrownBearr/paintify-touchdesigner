@@ -58,6 +58,7 @@ int main(int argc, char** argv) {
     }
 
     int received = 0;
+    bool wrongSender = false;
     unsigned char lastSample[4] = {};
     bool haveSample = false;
     int sourceStep = 0;
@@ -78,6 +79,11 @@ int main(int argc, char** argv) {
                 receiver.IsUpdated();
             }
         } else if (receiver.ReceiveTexture(output, GL_TEXTURE_2D)) {
+            if (std::strcmp(receiver.GetSenderName(), "Paintify Smoke Output") != 0) {
+                std::fprintf(stderr, "Unexpected Spout sender: %s\n", receiver.GetSenderName());
+                wrongSender = true;
+                break;
+            }
             if (receiver.IsUpdated()) {
                 glDeleteTextures(1, &output);
                 output = 0;
@@ -111,5 +117,5 @@ int main(int argc, char** argv) {
         std::chrono::duration<double>(lastPainted - firstPainted).count() : 0.0;
     std::printf("Received %d painted Spout frames (%.1f fps after startup)\n",
                 received, elapsed > 0.0 ? (received - 1) / elapsed : 0.0);
-    return received >= target ? 0 : 5;
+    return wrongSender ? 6 : received >= target ? 0 : 5;
 }

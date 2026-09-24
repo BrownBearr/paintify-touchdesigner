@@ -99,6 +99,8 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
         havePainting = true;
         params.frame += 1.f;
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
+        // ReleaseSender clears Spout's configured name on input reconnect.
+        sender.SetSenderName(live.outputName.c_str());
         if (!sender.SendTexture(pipe.canvasTexture(), GL_TEXTURE_2D,
                                 unsigned(width), unsigned(height))) {
             std::fprintf(stderr, "Spout failed to publish painted frame\n");
