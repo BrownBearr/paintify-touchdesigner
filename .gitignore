@@ -1,5 +1,6 @@
 build/
 build-live/
+build-package/
 frames/
 frames_out/
 painted/
@@ -11,3 +12,4 @@ implementation_plan.md
 task.md
 imgui.ini
 __pycache__/
+touchdesigner/Paintify.tox

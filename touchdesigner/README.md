@@ -1,60 +1,77 @@
 # Paintify for TouchDesigner
 
-Paintify is a reusable TouchDesigner component with one TOP input and one TOP
-output. Any TOP can feed it: Movie File In TOP for MP4 files, Video Device In TOP
-for cameras/capture cards, Video Stream In TOP for network feeds, or another
-TouchDesigner composition. The output is the existing GPU Hertzmann renderer's
-curved strokes, brush texture and optional impasto/relaxation.
+Paintify is a Windows TouchDesigner component with one TOP input and one TOP
+output. It paints incoming images or video on the GPU and shares textures with
+TouchDesigner through Spout.
 
-## Install on this computer
+## For users: one-file install
 
-Run `tools\build-live.bat` from this repository to build the live renderer in
-`build-live/gpu-sbr.exe`. In TouchDesigner, open
-**Dialogs → Textport**, set the Textport to Python, and run this one line:
+Download **Paintify.tox** from the GitHub release, then drag it into the
+TouchDesigner Network Editor. Connect any TOP to its input and connect its
+output to a viewer or another TOP. The TOX contains the renderer executable,
+its runtime DLLs, and its shaders. On first use it extracts them to
+`%LOCALAPPDATA%\Paintify\<bundle-id>`; no compiler, vcpkg, source checkout,
+or separate Paintify installer is needed. The Windows VC++ runtime must
+be available. Leave **Renderer executable override** blank
+to use the bundled copy.
 
-```python
-import runpy, pathlib; runpy.run_path(str(pathlib.Path.home() / 'paintify-touchdesigner' / 'touchdesigner' / 'install_paintify.py'))
-```
+The component starts automatically when loaded. If the timeline is paused,
+its startup callback still runs. On exit or component deletion, it stops its
+renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
+Spout support are required. The TOX is Windows-only because the bundled
+renderer is a Windows executable.
 
-The installer creates a `paintify` component in `/project1` and saves
-`touchdesigner/Paintify.tox`. No code editing is required. The `.tox` can be
-dragged into other TouchDesigner projects. The component holds the renderer
-executable path in its **Paintify → Renderer executable** parameter.
+## For maintainers: build the TOX
 
-## Use
+1. Build the independent renderer with `tools\build-package.bat`. This uses
+   MSVC Build Tools, CMake, Ninja, and vcpkg. The package build is separate
+   from `build-live`, so a running development instance is unaffected.
+2. Open a new blank TouchDesigner project.
+3. Open **Dialogs → Textport**, set it to Python, and run:
 
-1. Add a **Movie File In TOP** for an MP4, or a **Video Device In TOP** for a
-   camera. Connect its output to the `paintify` component's input.
-2. Connect the `paintify` output to a viewer, a Window COMP, or a Movie File Out
-   TOP. The component starts its hidden GPU renderer when loaded and stops it
-   when TouchDesigner exits or the component is removed.
-3. The default is **12 painted frames per second**. TouchDesigner may display
-   those frames on a faster timeline, holding each painted image in between.
-   Set the Movie File Out TOP's output rate to 12 if you want a 12 fps file.
+   ```python
+   import runpy; runpy.run_path(r'C:\Users\I3row\paintify-touchdesigner\touchdesigner\install_paintify.py')
+   ```
 
-The Paintify page exposes **Look**, **Relaxation iterations**, **Brush texture**,
-**Impasto height**, **Impasto lighting**, **Temporal repaint threshold**, and
-**Optical flow levels**. Changing a control restarts the hidden renderer so
-the new look takes effect. Set **Paintify active** off to stop it.
+   Replace the path if the repository lives elsewhere.
 
-Live texture sharing uses Spout on the same Windows computer. There is no CPU
-readback in the normal input/output path. A log is written to
-`build-live/paintify-live.log` if a sender is missing or the bridge fails.
+4. The script creates `Paintify.tox` with all runtime files in
+   its virtual file system. Upload this single file as a GitHub release asset.
+   Keep source and build scripts in the repository for maintainability.
 
-TouchDesigner Non-Commercial limits images to 1280×1280, so full 1920×1080
-requires a license without that limit. The standalone renderer remains able to
-process 1080p independently of TouchDesigner's license.
+The installer replaces a component named `paintify` in `/project1`, so build
+the release TOX in a blank project.
 
-## Architecture and limits
+## Controls
 
-The In TOP feeds a Syphon Spout Out TOP. The hidden `gpu-sbr.exe --live-spout`
-process receives that texture, copies it into the renderer's source texture,
-paints on the GPU, and publishes the canvas to a Syphon Spout In TOP. An Out TOP
-exposes the painting from the component. Input resize resets temporal state.
+**Look** is a dropdown: Impressionist, Expressionist, Pointillist, Wash,
+Detail. The main page also provides painted FPS, relaxation, brush texture,
+impasto, temporal repaint, and optical flow. **Brush texture = -1** uses the
+chosen look's preset value.
 
-The renderer is paced at 12 fps, but actual throughput depends on capture,
-Spout transfer, brush settings, resolution and the rest of the TouchDesigner
-network. Moving footage with temporal repaint and optical flow can still soften
-or flicker: optical flow carries the painted canvas rather than persistent
-stroke objects. For a deliberately repainted stop-motion look, leave Temporal
-repaint threshold at zero.
+**Paintify Advanced** exposes the other live-compatible GPU-SBR controls:
+radii, threshold, curvature, opacity, grid spacing, stroke lengths,
+underpaint, painting passes, tensor smoothing, edge tangent flow, bristle
+density, texture taper, dry brush, light angle, jitters, relaxation tuning,
+and optical flow iterations. Numeric advanced controls default to `-1`,
+which leaves the renderer's preset or default intact. Empty radii and
+**Underpaint: Use look** likewise leave the preset intact. Changing a control
+restarts the renderer.
+
+CLI-only options for loading/saving files, batch rendering, video encoding,
+and diagnostics are not relevant to a live TOP component.
+
+## Test and troubleshooting
+
+1. Add a Movie File In TOP or Video Device In TOP and verify it displays an
+   image by itself.
+2. Connect it to Paintify, then connect Paintify to a Null TOP or viewer.
+3. Change **Look** and verify the output changes. Try a threshold override
+   on Paintify Advanced, then set it back to `-1`.
+4. If the output is blank, open **Dialogs → Textport**. The component prints
+   its log path when the renderer starts. The bundled log is under
+   `%LOCALAPPDATA%\Paintify\<bundle-id>\paintify-live.log`.
+5. TouchDesigner Non-Commercial limits images to 1280×1280.
+
+Multiple components can coexist because their Spout sender names derive from
+their operator paths.

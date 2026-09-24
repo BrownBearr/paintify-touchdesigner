@@ -1,8 +1,12 @@
 # Paintify for TouchDesigner
 
-This is the standalone TouchDesigner project. It bundles its own GPU painterly
-renderer and Spout bridge; it does not need a checkout of `paintify-GPU`.
-For live TOP input/output, see [Paintify component setup](touchdesigner/README.md).
+This repository contains the standalone GPU renderer and a TouchDesigner
+component. For TouchDesigner users, download the single `Paintify.tox` release
+asset, drag it into a Network Editor, and connect any TOP to its input. The TOX
+bundles the renderer, DLLs, and shaders; no source checkout or build is needed.
+See [Paintify component setup](touchdesigner/README.md) for controls and limits.
+
+The source and build scripts below are for developers and standalone rendering.
 
 A GPU port of [PainterlyImageCreatorWeb](https://github.com/BrownBearr/PainterlyImageCreatorWeb)'s
 Hertzmann renderer. The goal is the web version's output, not a new look: the

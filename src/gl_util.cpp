@@ -1,6 +1,7 @@
 #include "gl_util.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
 
@@ -26,7 +27,11 @@ static int64_t fileMTime(const std::string& path) {
     return static_cast<int64_t>(st.st_mtime);
 }
 
-static std::string shaderDir() { return std::string(SBR_ROOT_DIR) + "/shaders/"; }
+static std::string shaderDir() {
+    const char* overrideDir = std::getenv("PAINTIFY_SHADER_DIR");
+    if (overrideDir && *overrideDir) return std::string(overrideDir) + "/";
+    return std::string(SBR_ROOT_DIR) + "/shaders/";
+}
 
 // common.glsl is included by every stage, so it is tracked as a dependency of
 // every program rather than of the one file that names it.

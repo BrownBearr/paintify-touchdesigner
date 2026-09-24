@@ -7,91 +7,21 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE = ROOT / 'build-live' / 'gpu-sbr.exe'
-TOX = ROOT / 'touchdesigner' / 'Paintify.tox'
+BUILD = ROOT / ('build-package' if (ROOT / 'build-package' / 'gpu-sbr.exe').is_file() else 'build-live')
+EXE = BUILD / 'gpu-sbr.exe'
+TOX = ROOT / 'Paintify.tox'
 
 if not EXE.is_file():
     raise FileNotFoundError(f'Build the Paintify GPU renderer first: {EXE}')
 
 
-RUNTIME = r'''
-import builtins
-import os
-import subprocess
-
-def _registry():
-    if not hasattr(builtins, '_paintify_processes'):
-        builtins._paintify_processes = {}
-    return builtins._paintify_processes
-
-def names(comp):
-    # A path-based name lets multiple Paintify components coexist.
-    base = comp.path.replace('/', '_').strip('_')
-    return ('Paintify_' + base + '_input', 'Paintify_' + base + '_output')
-
-def stop(comp):
-    entry = _registry().pop(comp.id, None)
-    if entry is None:
-        return
-    proc, log, stopfile = entry
-    if proc is not None and proc.poll() is None:
-        with open(stopfile, 'w', encoding='utf-8') as signal:
-            signal.write('stop')
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-    log.close()
-    if os.path.exists(stopfile):
-        os.remove(stopfile)
-
-def start(comp):
-    stop(comp)
-    if not comp.par.Active.eval():
-        return
-    exe = comp.par.Executable.eval()
-    if not os.path.isfile(exe):
-        print('Paintify: missing renderer: ' + exe)
-        return
-    incoming, outgoing = names(comp)
-    stopfile = os.path.join(os.path.dirname(exe),
-                            'paintify-stop-' + str(comp.id) + '.flag')
-    if os.path.exists(stopfile):
-        os.remove(stopfile)
-    args = [exe, '--live-spout', '--spout-in', incoming,
-            '--spout-out', outgoing,
-            '--live-stop-file', stopfile,
-            '--live-parent-pid', str(os.getpid()),
-            '--target-fps', str(comp.par.Fps.eval()),
-            '--preset', str(comp.par.Preset.eval()),
-            '--relax', str(comp.par.Relax.eval()),
-            '--brush-texture', str(comp.par.Brushtexture.eval()),
-            '--impasto', str(comp.par.Impasto.eval()),
-            '--impasto-light', str(comp.par.Impastolight.eval()),
-            '--temporal-diff', str(comp.par.Temporal.eval()),
-            '--flow', str(comp.par.Flow.eval())]
-    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-    log = open(os.path.join(os.path.dirname(exe), 'paintify-live.log'), 'a',
-               encoding='utf-8')
-    try:
-        proc = subprocess.Popen(args, cwd=os.path.dirname(os.path.dirname(exe)),
-                                creationflags=flags, stdout=log,
-                                stderr=subprocess.STDOUT)
-    except Exception:
-        log.close()
-        raise
-    _registry()[comp.id] = (proc, log, stopfile)
-    print('Paintify started: ' + incoming + ' -> ' + outgoing)
-'''
+RUNTIME = (Path(__file__).parent / 'paintify_runtime.py').read_text(encoding='utf-8')
 
 EXECUTE = r'''
-def create():
+def onCreate():
     comp = parent()
-    run(lambda: comp.op('paintify_runtime').module.start(comp), delayFrames=2)
+    run(lambda: comp.op('paintify_runtime').module.start(comp),
+        delayFrames=2, delayRef=op.TDResources)
     return
 
 def onExit():
@@ -124,6 +54,9 @@ def install():
         raise RuntimeError('TouchDesigner project /project1 is unavailable')
     previous = root.op('paintify')
     if previous is not None:
+        old_runtime = previous.op('paintify_runtime')
+        if old_runtime is not None:
+            old_runtime.module.stop(previous)
         previous.destroy()
 
     comp = root.create('baseCOMP', 'paintify')
@@ -131,25 +64,70 @@ def install():
     comp.nodeY = 0
     page = comp.appendCustomPage('Paintify')
     page.appendToggle('Active', label='Paintify active')
-    page.appendStr('Executable', label='Renderer executable')
-    page.appendStr('Preset', label='Look')
+    page.appendStr('Executable', label='Renderer executable override')
+    page.appendMenu('Preset', label='Look')
+    comp.par.Preset.menuNames = ['impressionist', 'expressionist',
+                                 'pointillist', 'wash', 'detail']
+    comp.par.Preset.menuLabels = ['Impressionist', 'Expressionist',
+                                  'Pointillist', 'Wash', 'Detail']
     page.appendFloat('Fps', label='Painted frames / sec')
     page.appendInt('Relax', label='Relaxation iterations')
-    page.appendFloat('Brushtexture', label='Brush texture')
+    page.appendFloat('Brushtexture', label='Brush texture (-1 = look)')
     page.appendFloat('Impasto', label='Impasto height')
     page.appendFloat('Impastolight', label='Impasto lighting')
     page.appendFloat('Temporal', label='Temporal repaint threshold')
     page.appendInt('Flow', label='Optical flow levels')
+
+    advanced = comp.appendCustomPage('Paintify Advanced')
+    advanced.appendStr('Radii', label='Brush radii (blank = look)')
+    advanced.appendFloat('Threshold', label='Stroke threshold (-1 = look)')
+    advanced.appendFloat('Curvature', label='Curvature (-1 = look)')
+    advanced.appendFloat('Opacity', label='Opacity (-1 = look)')
+    advanced.appendFloat('Gridfactor', label='Grid factor (-1 = look)')
+    advanced.appendFloat('Maxlen', label='Maximum stroke length (-1 = look)')
+    advanced.appendFloat('Minlen', label='Minimum stroke length (-1 = look)')
+    advanced.appendMenu('Underpaint', label='Underpaint')
+    comp.par.Underpaint.menuNames = ['preset', 'blur', 'average', 'none']
+    comp.par.Underpaint.menuLabels = ['Use look', 'Blur', 'Average', 'None']
+    advanced.appendInt('Passes', label='Painting passes (-1 = default)')
+    advanced.appendFloat('Tensorsigma', label='Tensor sigma (-1 = default)')
+    advanced.appendInt('Etf', label='Edge tangent iterations (-1 = default)')
+    advanced.appendFloat('Etfradius', label='Edge tangent radius (-1 = default)')
+    advanced.appendFloat('Bristledensity', label='Bristle density (-1 = default)')
+    advanced.appendFloat('Texturetaper', label='Texture taper (-1 = default)')
+    advanced.appendFloat('Drybrush', label='Dry brush (-1 = default)')
+    advanced.appendFloat('Lightangle', label='Light angle (-1 = default)')
+    advanced.appendFloat('Sizejitter', label='Size jitter (-1 = default)')
+    advanced.appendFloat('Anglejitter', label='Angle jitter (-1 = default)')
+    advanced.appendFloat('Opacityjitter', label='Opacity jitter (-1 = default)')
+    advanced.appendFloat('Relaxarea', label='Relax area (-1 = default)')
+    advanced.appendFloat('Relaxmove', label='Relax move (-1 = default)')
+    advanced.appendInt('Relaxcandidates', label='Relax candidates (-1 = default)')
+    advanced.appendFloat('Relaxremove', label='Relax remove (-1 = default)')
+    advanced.appendInt('Relaxsubpasses', label='Relax subpasses (-1 = default)')
+    advanced.appendInt('Flowiters', label='Optical flow iterations (-1 = default)')
+    advanced.appendToggle('Jitterperframe', label='Jitter each frame')
+
     comp.par.Active = True
-    comp.par.Executable = str(EXE)
+    comp.par.Executable = ''
     comp.par.Preset = 'impressionist'
     comp.par.Fps = 12
     comp.par.Relax = 4
-    comp.par.Brushtexture = 0.45
+    comp.par.Brushtexture = -1
     comp.par.Impasto = 0.35
     comp.par.Impastolight = 0.5
     comp.par.Temporal = 0
     comp.par.Flow = 0
+    comp.par.Radii = ''
+    comp.par.Underpaint = 'preset'
+    for name in ('Threshold', 'Curvature', 'Opacity', 'Gridfactor',
+                 'Maxlen', 'Minlen', 'Passes', 'Tensorsigma', 'Etf',
+                 'Etfradius', 'Bristledensity', 'Texturetaper', 'Drybrush',
+                 'Lightangle', 'Sizejitter', 'Anglejitter', 'Opacityjitter',
+                 'Relaxarea', 'Relaxmove', 'Relaxcandidates', 'Relaxremove',
+                 'Relaxsubpasses', 'Flowiters'):
+        getattr(comp.par, name).val = -1
+    comp.par.Jitterperframe = False
 
     source = comp.create('inTOP', 'source')
     send = comp.create('syphonspoutoutTOP', 'send_to_paintify')
@@ -174,7 +152,13 @@ def install():
     controls = comp.create('parameterexecuteDAT', 'paintify_controls')
     controls.text = PAR_EXECUTE
     controls.par.op = '..'
-    controls.par.pars = 'Active Executable Preset Fps Relax Brushtexture Impasto Impastolight Temporal Flow'
+    controls.par.pars = ('Active Executable Preset Fps Relax Brushtexture Impasto '
+                         'Impastolight Temporal Flow Radii Threshold Curvature '
+                         'Opacity Gridfactor Maxlen Minlen Underpaint Passes '
+                         'Tensorsigma Etf Etfradius Bristledensity Texturetaper '
+                         'Drybrush Lightangle Sizejitter Anglejitter Opacityjitter '
+                         'Relaxarea Relaxmove Relaxcandidates Relaxremove '
+                         'Relaxsubpasses Flowiters Jitterperframe')
     controls.par.valuechange = True
     controls.par.custom = True
     cleanup = comp.create('opexecuteDAT', 'paintify_cleanup')
@@ -182,7 +166,16 @@ def install():
     cleanup.par.op = '..'
     cleanup.par.destroy = True
 
+    for name in ('gpu-sbr.exe', 'glfw3.dll', 'Spout.dll'):
+        path = BUILD / name
+        if not path.is_file():
+            raise FileNotFoundError('Build the Paintify live renderer first: ' + str(path))
+        comp.vfs.addFile(str(path), overrideName='runtime/' + name)
+    for path in sorted((ROOT / 'shaders').glob('*')):
+        if path.is_file():
+            comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
     comp.save(str(TOX), createFolders=True)
+    runtime.module.start(comp)
     print('Paintify component saved to ' + str(TOX))
     return comp
 

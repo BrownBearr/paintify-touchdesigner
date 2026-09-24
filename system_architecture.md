@@ -450,3 +450,19 @@ Syphon Spout Out, Syphon Spout In, and Out TOP. The component's callbacks
 manage the external renderer process. Sender names derive from the component
 path so multiple instances can coexist. The renderer caps painting at 12 fps
 by default; TouchDesigner holds the last painted texture between updates.
+
+
+### Portable TouchDesigner component packaging
+
+The release `Paintify.tox` embeds `gpu-sbr.exe`, `glfw3.dll`, `Spout.dll`,
+and all shader sources in its component VFS. `touchdesigner/install_paintify.py`
+creates the component and embeds `touchdesigner/paintify_runtime.py` as a Text
+DAT. The runtime hashes the embedded files, extracts them to a versioned
+directory under `%LOCALAPPDATA%/Paintify`, sets `PAINTIFY_SHADER_DIR`, then
+launches the renderer. `gl_util.cpp` honors that shader override and retains
+the source-tree path for standalone development. The Execute DAT's
+`onCreate()` callback starts the renderer when the TOX is loaded; parameter
+changes restart it. Build a release executable in `build-package` so an
+existing `build-live` process does not lock the linker output. Keep the
+repository source; publish the generated TOX as the single user-facing
+GitHub release asset.
