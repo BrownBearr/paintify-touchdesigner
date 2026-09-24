@@ -20,7 +20,7 @@ its startup callback still runs. On exit or component deletion, it stops its
 renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
 Spout support are required. The TOX is Windows-only because the bundled
 renderer is a Windows executable. A Mac build would need a native GPU
-renderer and Syphon integration; this Windows TOX does not run on macOS.
+renderer and Syphon integration; this Windows TOX does not run on macOS. See the [macOS feasibility and port plan](../docs/macos-touchdesigner-feasibility.md).
 
 ## For maintainers: build the TOX
 

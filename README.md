@@ -5,6 +5,7 @@ component. For TouchDesigner users, download [Paintify.tox](Paintify.tox) from
 the repository root, drag it into a Network Editor, and connect any TOP to its input. The TOX
 bundles the renderer, DLLs, and shaders; no source checkout or build is needed.
 See [Paintify component setup](touchdesigner/README.md) for controls and limits.
+The current drag-and-drop TOX is Windows-only; see the [macOS feasibility and port plan](docs/macos-touchdesigner-feasibility.md).
 
 The source and build scripts below are for developers and standalone rendering.
 
