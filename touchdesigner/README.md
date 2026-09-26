@@ -8,8 +8,15 @@ curved strokes, brush texture and optional impasto/relaxation.
 
 ## Install on this computer
 
-Run `tools\build-live.bat` from this repository to build the live renderer in
-`build-live/gpu-sbr.exe`. In TouchDesigner, open
+**Windows:** run `tools\build-live.bat` from this repository to build the live
+renderer in `build-live/gpu-sbr.exe`.
+
+**macOS** (Apple Silicon or Intel): run `tools/build-mac.sh`, which builds
+`build/gpu-sbr`. The component and everything below are the same on both;
+the bridge is Syphon instead of Spout, which TouchDesigner's Syphon Spout
+In/Out TOPs already speak on a Mac.
+
+In TouchDesigner, open
 **Dialogs → Textport**, set the Textport to Python, and run this one line:
 
 ```python
@@ -40,6 +47,15 @@ the new look takes effect. Set **Paintify active** off to stop it.
 Live texture sharing uses Spout on the same Windows computer. There is no CPU
 readback in the normal input/output path. A log is written to
 `build-live/paintify-live.log` if a sender is missing or the bridge fails.
+
+On macOS it uses Syphon, and frames cross through the CPU: the renderer reads
+TouchDesigner's IOSurface, paints on the GPU through MoltenVK, and writes the
+painting into its own IOSurface. At 12 painted frames per second that costs a
+few milliseconds a frame on Apple Silicon's unified memory. The log is
+`build/paintify-live.log`. Syphon carries 8-bit BGRA frames, so the painting
+comes back 8-bit whatever the input TOP's format. If the Syphon Spout In TOP
+inside the component shows no image while the log reports painted frames,
+pick the `Paintify_…_output` entry from that TOP's sender menu.
 
 TouchDesigner Non-Commercial limits images to 1280×1280, so full 1920×1080
 requires a license without that limit. The standalone renderer remains able to

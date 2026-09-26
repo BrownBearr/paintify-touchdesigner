@@ -1,7 +1,9 @@
 # Paintify for TouchDesigner
 
 This is the standalone TouchDesigner project. It bundles its own GPU painterly
-renderer and Spout bridge; it does not need a checkout of `paintify-GPU`.
+renderer and its TouchDesigner bridge (Spout on Windows, Syphon on macOS); it
+does not need a checkout of `paintify-GPU`. It runs on Windows and on macOS,
+Apple Silicon (M1 and later) included — see [macOS](#macos).
 For live TOP input/output, see [Paintify component setup](touchdesigner/README.md).
 
 A GPU port of [PainterlyImageCreatorWeb](https://github.com/BrownBearr/PainterlyImageCreatorWeb)'s
@@ -44,7 +46,7 @@ two runs (it uses `Math.random()`), which is the floor any port can reach.
 Per-layer stroke counts agree within 1%. See [docs/comparison.md](docs/comparison.md)
 for the method and the numbers.
 
-## Build
+## Build (Windows)
 
 Requires the MSVC Build Tools (or any C++17 compiler), CMake >= 3.21, and vcpkg.
 Dependencies (`glfw3`, `glad`, `glm`, `stb`, `imgui`) come from `vcpkg.json`.
@@ -61,12 +63,68 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 ```
 
-Shaders are read from the source tree at runtime (`SBR_ROOT_DIR`), so **F5**
-reloads them without rebuilding.
+Shaders are read from the source tree at runtime (`SBR_ROOT_DIR`, or
+`PAINTIFY_ROOT` if the build has moved), so **F5** reloads them without
+rebuilding.
+
+## macOS
+
+Apple Silicon (M1 and later) or Intel, macOS 11 or newer. You need the Xcode
+Command Line Tools and [Homebrew](https://brew.sh); full Xcode is not
+required.
+
+```sh
+tools/build-mac.sh         # installs the Homebrew dependencies, then builds
+./run-mac.command          # or double-click it in Finder
+build/gpu-sbr --in photo.jpg --preset expressionist
+```
+
+Every command in this README works the same way with `build/gpu-sbr` in place
+of `build\gpu-sbr.exe`: the GUI, `--headless`, `--video`, `--batch`, the
+presets, relaxation, ETF and flow. The file pickers are the native macOS
+panels.
+
+**Why the Mac build is different underneath.** The renderer is OpenGL 4.6
+compute shaders, and macOS stops at OpenGL 4.1, which has no compute shaders
+at all — so the GL renderer cannot run on a Mac however it is built. The
+pipeline therefore sits on a small GPU interface (`src/gpu.h`) with two
+backends: OpenGL 4.6 on Windows, as before, and Vulkan on macOS, running on
+Apple's Metal through [MoltenVK](https://github.com/KhronosGroup/MoltenVK).
+Both run the **same shader files**: the Vulkan backend compiles them at
+runtime with glslang, so F5 hot-reload works on a Mac too. The Windows build
+is unchanged in effect — its output is bit-identical to what it was before the
+split.
+
+How close the two backends are, measured on one device (Mesa, which provides
+both OpenGL and Vulkan, run single-threaded so it is deterministic): identical
+per-layer seed and stroke counts, relaxation energies, ETF coherence and
+optical-flow statistics, and images within 78–103 dB PSNR of each other —
+typically a few dozen pixels out of 480,000 differing by one level. That is far
+inside the renderer's own run-to-run noise on a GPU, which comes from
+`atomicAdd` ordering (see `system_architecture.md`).
+
+Dependencies come from Homebrew (`molten-vk`, `vulkan-loader`,
+`vulkan-headers`, `glslang`, `glfw`, and `ffmpeg` for video); Dear ImGui, stb
+and Syphon are fetched by CMake at pinned versions. To build by hand:
+
+```sh
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+cmake --build build
+```
+
+The Vulkan backend also builds on Linux (`-DPAINTIFY_GPU=VULKAN`), which is
+how it is tested without a Mac. `PAINTIFY_VK_VALIDATION=1` turns on the Khronos
+validation layer; `PAINTIFY_VK_DEVICE=<name>` picks a GPU when there are
+several. `.github/workflows/macos.yml` builds and runs the Mac build on an M1
+runner, including the Syphon round trip TouchDesigner uses.
+
+The performance tables above were measured on an RTX 3060 Ti; Apple Silicon
+has not been benchmarked here.
 
 ## Run
 
-**Easiest: double-click `run.bat`.** The window has native file pickers —
+**Easiest: double-click `run.bat`** (`run-mac.command` on a Mac). The window
+has native file pickers —
 `Open image…`, `Open video…`, `Add images…`, `Choose folder…` — and you can
 drag files or a whole folder onto it. Pick your input, confirm the output file
 or folder, tune with the sliders against a live preview, then hit **Export**

@@ -213,8 +213,8 @@ Colour is per-stroke and lives in `StrokeHeader`, not on every vertex.
 
 ## Telemetry
 
-Each stage has a double-buffered `GL_TIME_ELAPSED` query that is read one frame
-late, so timings never stall. Stages 4-6 run once per (layer, pass), so the
+Each stage has a double-buffered `GL_TIME_ELAPSED` query (a pair of
+timestamps on Vulkan) that is read one frame late, so timings never stall. Stages 4-6 run once per (layer, pass), so the
 reported figure sums `lastMs` after every `end()` — the frame total shifted by
 one measurement, which settles immediately.
 
@@ -338,8 +338,9 @@ a job must not disturb the interactive session's.
 `filedialog.cpp` wraps `IFileOpenDialog` / `IFileSaveDialog` rather than the
 legacy `GetOpenFileName` — no `MAX_PATH` truncation, and folder picking is the
 `FOS_PICKFOLDERS` flag rather than a separate shell-browse API. It needs no new
-dependency: MSVC already links `ole32` and `shell32` by default. Non-Windows
-builds get stubs that return empty, so callers only ever check for empty.
+dependency: MSVC already links `ole32` and `shell32` by default. macOS uses
+`NSOpenPanel` / `NSSavePanel` (`filedialog_mac.mm`); Linux gets stubs that
+return empty, so callers only ever check for empty.
 
 GUI state is one `Gui` struct, so the drop handler, the four picker buttons and
 the export button cannot disagree about what is loaded or where it is going.
@@ -436,6 +437,70 @@ carried canvas is warped along the motion first, so the threshold test asks
 whether the subject changed rather than whether the pixel did. At `--flow 0` the
 behaviour is the web's, unchanged.
 
+## GPU backends (`src/gpu.h`)
+
+macOS stops at OpenGL 4.1, which has no compute shaders, so the GL renderer
+cannot run on a Mac at all. Rather than keep a second copy of the pipeline,
+`Pipeline` is written against `gpu.h`, a handful of operations shaped like the
+GL calls it used to make, with two implementations chosen at build time
+(`PAINTIFY_GPU`):
+
+| Backend | Where | Notes |
+|---|---|---|
+| `gpu_gl.cpp` | Windows (default) | The previous GL calls, one for one. Output is bit-identical to the pre-split renderer |
+| `gpu_vk.cpp` | macOS (default), Linux | Vulkan 1.1. On a Mac it runs on Metal through MoltenVK |
+
+The interface keeps GL's model on purpose: binding points are global and
+sticky, loose uniforms live on the program, and the pipeline still says where
+it needs a `memoryBarrier`. That is what let the port be mechanical.
+
+**Shaders.** Both backends load the same GLSL files. The Vulkan backend
+compiles them at runtime with glslang under its *relaxed Vulkan rules*: loose
+`uniform int uPass` declarations are gathered into one default uniform block,
+`gl_VertexID`/`gl_InstanceID` map to their Vulkan equivalents, and GL's
+separate binding namespaces are shifted into disjoint ranges of one descriptor
+set -- samplers from 0, images from 16, the `Params` block at 24, the loose
+uniforms at 25, storage buffers from 32. Which bindings a program uses, and
+where its loose uniforms sit, is read back out of its SPIR-V. So the binding
+numbers in the shaders keep their meaning, and F5 hot-reload works on both.
+
+**Execution.** At each dispatch or draw the program's bindings are filled from
+the sticky binding state and pushed with `VK_KHR_push_descriptor`; the
+`Params` block and the loose uniforms are copied into a ring buffer at that
+moment, which is what gives `setParams` GL's "the value when the command was
+issued" semantics. Every image stays in `VK_IMAGE_LAYOUT_GENERAL`, and every
+command is separated from the previous one by a full memory barrier. That is
+more synchronisation than strictly necessary, but nearly every stage consumes
+the one before it anyway. Work is recorded into one command buffer and
+submitted only when the host needs a result (a readback, `finish()`, a
+presented frame), and every submission is waited for.
+
+**The one semantic difference: flat varyings.** GL takes a triangle-strip
+triangle's flat values from its *last* vertex, Vulkan (and Metal) from its
+*first*. `vREff` is flat but varies along a stroke through the tip taper, so a
+straight port drew stroke caps a slightly different width -- invisible in any
+one image, and found only because the two backends were compared numerically.
+`stroke.vert` has a Vulkan-only block (`#ifdef VULKAN`) that emits, at vertex
+i, the value GL would have taken from vertex i + 2.
+
+**Verification.** Mesa provides both OpenGL (llvmpipe) and Vulkan (lavapipe)
+on the same software rasteriser, and with `LP_NUM_THREADS=0` both are
+deterministic. On a 16-image sweep -- every preset, relaxation, ETF, impasto,
+tensor, temporal + flow, batch -- the two backends produce identical per-layer
+seed and stroke counts, relaxation energies, ETF coherence and flow statistics,
+and images within 78-103 dB PSNR (typically a few dozen of 480,000 pixels off
+by one level). Over a long temporal clip with flow the images drift further
+apart as one stroke's difference is carried forward, but less than GL drifts
+from *itself* between two multithreaded runs. `PAINTIFY_VK_VALIDATION=1`
+enables the Khronos validation layer, and the sweep runs clean under it.
+
+**Display.** `display_gl.cpp` and `display_vk.cpp` own the window, the ImGui
+backend and putting the canvas on screen. GL uses `glBlitFramebuffer` under a
+scissor. Vulkan's blit honours no scissor, so there the same framing is a
+small full-screen fragment shader that maps each window pixel back to an image
+pixel with the `ViewXform` arithmetic. A headless Vulkan run creates no window
+and never starts GLFW.
+
 ## TouchDesigner live bridge
 
 The offline renderer and TouchDesigner bridge share one `Pipeline`. Live Spout
@@ -444,6 +509,19 @@ source for temporal painting and copies the new input entirely on the GPU.
 `Pipeline::canvasTexture` is handed to Spout2 for publication. A hidden GLFW
 window owns the OpenGL 4.6 context; TouchDesigner does not run these shaders
 inside its Vulkan context.
+
+On macOS the same loop is `live_syphon.mm`, over Syphon. It is built from
+Syphon's source (pinned in `CMakeLists.txt`), and only its base classes: they
+hand out raw IOSurfaces through the public `SyphonSubclassing.h` API, so
+neither Syphon's OpenGL nor its Metal renderer is compiled, and neither is
+Xcode's Metal compiler needed. Frames cross through the CPU -- the input
+IOSurface into `setSource`, `readCanvas` into the output IOSurface -- which
+keeps the file free of Metal/Vulkan interop at a cost of a few milliseconds a
+frame at 12 fps. Two details matter there: Syphon announces servers through
+distributed notifications, which arrive on the run loop, so the loop's waits
+run `CFRunLoopRunInMode` rather than sleeping; and the parent-process check is
+`kill(pid, 0)` plus "reparented to launchd". `tests/syphon_smoke.mm` is the
+round trip, the counterpart of `tests/spout_smoke.cpp`.
 
 `touchdesigner/install_paintify.py` constructs a component with an In TOP,
 Syphon Spout Out, Syphon Spout In, and Out TOP. The component's callbacks
