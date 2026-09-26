@@ -1097,6 +1097,26 @@ bool init(const InitOptions& opt, std::string* err) {
         if (layers.empty()) fprintf(stderr, "Vulkan validation layer not installed\n");
     }
 
+#if defined(__APPLE__) && defined(VK_EXT_layer_settings)
+    // Two MoltenVK defaults this renderer has no use for, and which probe
+    // Metal features that virtualised Macs (CI runners, VMs) do not have:
+    // Metal argument buffers -- push descriptors are always bound directly,
+    // so they would only ever hold ImGui's font -- and a placement MTLHeap per
+    // allocation, which only pays off with many small allocations rather than
+    // a few dozen large ones. Either env var, if set, still wins.
+    static const int32_t kOff = 0;
+    std::vector<VkLayerSettingEXT> mvkSettings;
+    if (hasExtension(instExts, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME)) {
+        for (const char* name : {"MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "MVK_CONFIG_USE_MTLHEAP"})
+            if (!std::getenv(name))
+                mvkSettings.push_back({"MoltenVK", name, VK_LAYER_SETTING_TYPE_INT32_EXT, 1, &kOff});
+    }
+    VkLayerSettingsCreateInfoEXT layerSettings{VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT};
+    layerSettings.settingCount = uint32_t(mvkSettings.size());
+    layerSettings.pSettings = mvkSettings.data();
+    if (!mvkSettings.empty()) exts.push_back(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
+#endif
+
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "gpu-sbr";
     app.pEngineName = "paintify";
@@ -1108,6 +1128,9 @@ bool init(const InitOptions& opt, std::string* err) {
     ici.ppEnabledExtensionNames = exts.data();
     ici.enabledLayerCount = uint32_t(layers.size());
     ici.ppEnabledLayerNames = layers.data();
+#if defined(__APPLE__) && defined(VK_EXT_layer_settings)
+    if (!mvkSettings.empty()) ici.pNext = &layerSettings;
+#endif
     VkResult r = vkCreateInstance(&ici, nullptr, &ctx.dev.instance);
     if (r != VK_SUCCESS) {
         if (err) {

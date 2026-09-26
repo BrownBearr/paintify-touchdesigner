@@ -14,11 +14,9 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     env:
-      # The runner is a VM whose paravirtual GPU lacks the Metal argument
-      # encoder API that MoltenVK probes at startup when it uses argument
-      # buffers, and the probe throws. Real Macs have it; this is CI-only.
-      MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS: "0"
-      # MoltenVK's own errors (Homebrew builds it silent by default).
+      # MoltenVK's own errors (Homebrew builds it silent by default). The
+      # runner is a VM with a paravirtual GPU; gpu_vk.cpp already turns off
+      # the two MoltenVK features that GPU lacks, so nothing else is set here.
       MVK_CONFIG_LOG_LEVEL: "1"
     steps:
       - uses: actions/checkout@v4
