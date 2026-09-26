@@ -494,6 +494,22 @@ apart as one stroke's difference is carried forward, but less than GL drifts
 from *itself* between two multithreaded runs. `PAINTIFY_VK_VALIDATION=1`
 enables the Khronos validation layer, and the sweep runs clean under it.
 
+**What running on Metal took.** Three things differed from Mesa's Vulkan, all
+found on GitHub's Apple Silicon runners, which is where the Mac build is
+tested:
+
+- `.length()` of a runtime-sized buffer read 0 for the push-descriptor
+  storage buffers, so every guard built on it failed and nothing was painted.
+  Vulkan builds take those capacities from the host instead
+  (`BUFFER_LENGTH` in `common.glsl`); GL still uses `.length()`.
+- MoltenVK's argument buffers and per-allocation `MTLHeap`s both probe Metal
+  features a virtualised GPU lacks. The renderer needs neither -- push
+  descriptors are always bound directly, and a few dozen large allocations
+  gain nothing from placement heaps -- so `gpu::init` turns both off through
+  `VK_EXT_layer_settings`, unless the `MVK_CONFIG_*` variable is set.
+- Metal compiles with fast-math by default. Measured, it makes no difference
+  to the cell error distribution, so it is left on.
+
 **Display.** `display_gl.cpp` and `display_vk.cpp` own the window, the ImGui
 backend and putting the canvas on screen. GL uses `glBlitFramebuffer` under a
 scissor. Vulkan's blit honours no scissor, so there the same framing is a

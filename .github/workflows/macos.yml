@@ -51,14 +51,6 @@ jobs:
           paint pointillist --preset pointillist
           paint tensor --tensor-sigma 2 --debug-cells
 
-      - name: Precision probe (Metal fast-math on vs off)
-        run: |
-          for fm in 0 2; do
-            echo "== MVK_CONFIG_FAST_MATH_ENABLED=$fm"
-            MVK_CONFIG_FAST_MATH_ENABLED=$fm build/gpu-sbr --headless --out ci/fm$fm.png \
-              --tensor-sigma 2 --debug-cells | grep -E "layer [12] |seeds:|^  r "
-          done
-
       - name: Video and batch
         run: |
           ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=12 \

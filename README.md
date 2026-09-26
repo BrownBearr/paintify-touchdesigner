@@ -112,14 +112,23 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew -
 cmake --build build
 ```
 
+On Apple Silicon itself, `.github/workflows/macos.yml` builds the Mac version
+exactly as above on GitHub's M1 runners and checks what it paints, not just
+that it exits: stills in every mode, video with audio, batch, the Syphon round
+trip TouchDesigner uses, and the GUI. On the 1920x1080 synthetic subject the
+M1 paints 34,522 seeds / 30,517 strokes against 34,873 / 30,832 on Mesa, with
+layer 0 identical (28,554 strokes) and the finer layers inside the usual
+run-to-run noise.
+
 The Vulkan backend also builds on Linux (`-DPAINTIFY_GPU=VULKAN`), which is
-how it is tested without a Mac. `PAINTIFY_VK_VALIDATION=1` turns on the Khronos
-validation layer; `PAINTIFY_VK_DEVICE=<name>` picks a GPU when there are
-several. `.github/workflows/macos.yml` builds and runs the Mac build on an M1
-runner, including the Syphon round trip TouchDesigner uses.
+how it is developed without a Mac. `PAINTIFY_VK_VALIDATION=1` turns on the
+Khronos validation layer; `PAINTIFY_VK_DEVICE=<name>` picks a GPU when there
+are several.
 
 The performance tables above were measured on an RTX 3060 Ti; Apple Silicon
-has not been benchmarked here.
+has not been benchmarked here. The per-stage GPU timings in the overlay can
+read 0 on a virtualised Mac, whose GPU cannot sample timestamps mid-frame;
+the frame wall time is still real.
 
 ## Run
 
