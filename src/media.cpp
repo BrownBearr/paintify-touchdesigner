@@ -66,6 +66,27 @@ double parseRate(const std::string& s) {
     return (den != 0.0) ? num / den : 0.0;
 }
 
+// "Hand me every decoded frame, one for one." ffmpeg 5.1 renamed -vsync 0 to
+// -fps_mode passthrough and ffmpeg 8 removed the old spelling, so ask the
+// installed ffmpeg once which one it understands rather than guess from a
+// version string -- Windows builds are often labelled by date.
+const char* passthroughFrames() {
+    static const char* flag = nullptr;
+    if (!flag) {
+        FILE* p = SBR_POPEN(shellWrap("ffmpeg -hide_banner -v quiet -f lavfi "
+                                      "-i nullsrc=s=16x16:d=0.04 -fps_mode passthrough "
+                                      "-f null -").c_str(), SBR_READ);
+        bool ok = false;
+        if (p) {
+            char buf[256];
+            while (fgets(buf, sizeof(buf), p)) {}
+            ok = SBR_PCLOSE(p) == 0;
+        }
+        flag = ok ? "-fps_mode passthrough" : "-vsync 0";
+    }
+    return flag;
+}
+
 } // namespace
 
 bool haveFfmpeg(std::string* whichMissing) {
@@ -140,11 +161,11 @@ bool Reader::open(const std::string& path, int w, int h, std::string* err) {
     close();
     m_frameBytes = size_t(w) * size_t(h) * 4;
 
-    // -vsync 0 keeps decoded frames one-to-one with what ffprobe counted,
+    // Passthrough keeps decoded frames one-to-one with what ffprobe counted,
     // instead of ffmpeg duplicating or dropping to fit a timebase.
     const std::string cmd =
         "ffmpeg -v error -nostdin -i " + q(path) +
-        " -f rawvideo -pix_fmt rgba -vsync 0 -";
+        " -f rawvideo -pix_fmt rgba " + passthroughFrames() + " -";
     m_pipe = SBR_POPEN(shellWrap(cmd).c_str(), SBR_READ);
     if (!m_pipe) {
         if (err) *err = "could not start ffmpeg to read " + path;

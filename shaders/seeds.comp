@@ -53,7 +53,8 @@ void main() {
     // paint. This is worker.js's frameDiffThreshold rule.
     if (uTemporal != 0 && c.maxDiff < FRAME_DIFF) return;
 
-    uint budget = min(uint(SEED_BUDGET), uint(seeds.length()));
+    // The seed buffer is sized for SEED_BUDGET strokes.
+    uint budget = min(uint(SEED_BUDGET), uint(BUFFER_LENGTH(seeds, SEED_BUDGET)));
     uint idx = atomicAdd(seedCount, 1u);
     if (idx >= budget) return;   // counter may overshoot; readers clamp
 

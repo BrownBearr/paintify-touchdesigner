@@ -33,15 +33,23 @@ jobs:
       - name: Headless render
         run: |
           mkdir -p ci
-          build/gpu-sbr --headless --out ci/still.png
+          build/gpu-sbr --headless --out ci/still.png | tee ci/still.log
           test -s ci/still.png
+          # An exit code of 0 is not a painting: require strokes on every layer.
+          grep -E "^seeds: [0-9]+  drawn: [1-9]" ci/still.log
+          test "$(grep -cE '^  r .* drawn [1-9]' ci/still.log)" -eq 3
 
       - name: Feature sweep
         run: |
-          build/gpu-sbr --headless --out ci/relax.png --relax 3 --relax-remove 1 --relax-log
-          build/gpu-sbr --headless --out ci/etf-impasto.png --etf 2 --etf-log --impasto 0.3 --impasto-light 0.3
-          build/gpu-sbr --headless --out ci/pointillist.png --preset pointillist
-          build/gpu-sbr --headless --out ci/tensor.png --tensor-sigma 2 --debug-cells
+          paint() {
+            name=$1; shift
+            build/gpu-sbr --headless --out "ci/$name.png" "$@" | tee "ci/$name.log"
+            grep -qE "^seeds: [0-9]+  drawn: [1-9]" "ci/$name.log"
+          }
+          paint relax --relax 3 --relax-remove 1 --relax-log
+          paint etf-impasto --etf 2 --etf-log --impasto 0.3 --impasto-light 0.3
+          paint pointillist --preset pointillist
+          paint tensor --tensor-sigma 2 --debug-cells
 
       - name: Video and batch
         run: |
@@ -50,8 +58,12 @@ jobs:
                  -c:v libx264 -pix_fmt yuv420p -c:a aac ci/clip.mp4
           build/gpu-sbr --video ci/clip.mp4 --out ci/painted.mp4 --temporal-diff 12 --flow 3
           ffprobe -v error -show_entries stream=codec_type,nb_frames -of csv ci/painted.mp4
+          frames=$(ffprobe -v error -select_streams v:0 -count_frames \
+                   -show_entries stream=nb_read_frames -of csv=p=0 ci/painted.mp4)
+          test "$frames" -eq 24
           mkdir -p ci/stills && cp ci/still.png ci/relax.png ci/stills/
           build/gpu-sbr --batch ci/stills --outdir ci/batch --format jpg
+          test -s ci/batch/still_painted.jpg && test -s ci/batch/relax_painted.jpg
 
       - name: Syphon bridge (TouchDesigner live path)
         run: build/paintify-syphon-smoke
@@ -102,7 +114,8 @@ jobs:
           mkdir -p ci
           for args in "" "--relax 2 --relax-remove 1" "--etf 2 --impasto 0.3 --impasto-light 0.3" \
                       "--preset pointillist"; do
-            build/gpu-sbr --headless --out ci/out.png $args 2> ci/stderr.txt
+            build/gpu-sbr --headless --out ci/out.png $args 2> ci/stderr.txt | tee ci/out.log
             cat ci/stderr.txt
             if grep -q "\[Vulkan" ci/stderr.txt; then exit 1; fi
+            grep -qE "^seeds: [0-9]+  drawn: [1-9]" ci/out.log
           done

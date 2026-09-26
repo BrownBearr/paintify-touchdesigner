@@ -66,7 +66,9 @@ void pass1(ivec2 cell) {
 
     uint gridW = uint((size.x + grid - 1) / grid);
     uint idx = uint(cell.y) * gridW + uint(cell.x);
-    if (idx >= cells.length()) return;
+    // Pipeline::ensureCellCapacity sizes the buffer for the whole grid, so on
+    // Vulkan the guard has nothing to add.
+    if (idx >= uint(BUFFER_LENGTH(cells, 0xffffffffu))) return;
     cells[idx].meanErr = (count > 0) ? sum / float(count) : 0.0;
     cells[idx].best = uint(bestPx.x) | (uint(bestPx.y) << 16);
     cells[idx].maxDiff = maxDiff;

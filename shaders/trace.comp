@@ -35,7 +35,7 @@ void storeVertex(uint slot, vec2 pos, float radius, float arc) {
 
 void main() {
     uint gid = gl_GlobalInvocationID.x;
-    uint budget = min(uint(SEED_BUDGET), uint(seeds.length()));
+    uint budget = min(uint(SEED_BUDGET), uint(BUFFER_LENGTH(seeds, SEED_BUDGET)));
     uint n = min(seedCount, budget);
 
     // One thread fills the draw command, so stage 4 never needs a readback.

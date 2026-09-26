@@ -111,6 +111,11 @@ Result runVideo(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
 
     r.wallSeconds = now() - t0;
     r.gpuMsMean = r.done ? totalMs / double(r.done) : 0.0;
+    // A reader that yields nothing is ffmpeg refusing the command line or the
+    // file, not an empty video -- and the encoder happily writes an empty
+    // container for it, which would otherwise be reported as success.
+    if (r.done == 0 && !r.cancelled && r.error.empty())
+        r.error = "ffmpeg decoded no frames from " + spec.input;
     r.ok = encoded && r.error.empty();
     if (!encoded && r.error.empty())
         r.error = "ffmpeg reported a problem writing " + spec.output;

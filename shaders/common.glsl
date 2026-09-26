@@ -78,6 +78,16 @@ uint frameSalt() { return (JITTER_PER_FRAME > 0.5) ? uint(FRAME) : 0u; }
 // plus one for the seed point itself.
 const uint MAX_VERTS = 33u;
 
+// How many elements a runtime-sized buffer holds, as a guard against writing
+// past it. GL answers with .length(). Under MoltenVK that reads 0 for
+// push-descriptor buffers -- every guard then fails and nothing is painted --
+// so Vulkan builds take the capacity the host sized the buffer for instead.
+#ifdef VULKAN
+#define BUFFER_LENGTH(buf, hostCapacity) (hostCapacity)
+#else
+#define BUFFER_LENGTH(buf, hostCapacity) (buf.length())
+#endif
+
 // One seed = one stroke to be traced. 32 bytes, std430.
 struct Seed {
     vec2  pos;
