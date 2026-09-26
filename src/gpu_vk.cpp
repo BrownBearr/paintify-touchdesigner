@@ -279,7 +279,18 @@ VkDeviceMemory allocate(VkMemoryRequirements req, VkMemoryPropertyFlags want,
     ai.memoryTypeIndex = memoryType(req.memoryTypeBits, want, prefer);
     if (got) *got = ctx.memProps.memoryTypes[ai.memoryTypeIndex].propertyFlags;
     VkDeviceMemory mem = VK_NULL_HANDLE;
-    check(vkAllocateMemory(ctx.dev.device, &ai, nullptr, &mem), "vkAllocateMemory");
+    const VkResult r = vkAllocateMemory(ctx.dev.device, &ai, nullptr, &mem);
+    if (r != VK_SUCCESS) {
+        const VkDeviceSize heap =
+            ctx.memProps.memoryHeaps[ctx.memProps.memoryTypes[ai.memoryTypeIndex].heapIndex].size;
+        fprintf(stderr, "Vulkan: vkAllocateMemory of %.1f MB failed (VkResult %d; memory type "
+                        "%u, flags 0x%x, heap %.0f MB, max storage buffer %.0f MB)\n",
+                double(req.size) / 1048576.0, int(r), ai.memoryTypeIndex,
+                unsigned(ctx.memProps.memoryTypes[ai.memoryTypeIndex].propertyFlags),
+                double(heap) / 1048576.0,
+                double(ctx.props.limits.maxStorageBufferRange) / 1048576.0);
+        std::abort();
+    }
     return mem;
 }
 

@@ -18,6 +18,8 @@ jobs:
       # encoder API that MoltenVK probes at startup when it uses argument
       # buffers, and the probe throws. Real Macs have it; this is CI-only.
       MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS: "0"
+      # MoltenVK's own errors (Homebrew builds it silent by default).
+      MVK_CONFIG_LOG_LEVEL: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +57,20 @@ jobs:
 
       - name: Syphon bridge (TouchDesigner live path)
         run: build/paintify-syphon-smoke
+
+      - name: GUI (window, swapchain, ImGui)
+        run: |
+          build/gpu-sbr --in ci/still.png > ci/gui.log 2>&1 &
+          pid=$!
+          sleep 30
+          screencapture -x ci/gui.png || true
+          # Still running after 30 s of frames means the window, the
+          # swapchain and ImGui all came up and kept presenting.
+          alive=0; kill -0 "$pid" 2>/dev/null && alive=1
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat ci/gui.log
+          test "$alive" = 1
 
       - uses: actions/upload-artifact@v4
         if: always()
