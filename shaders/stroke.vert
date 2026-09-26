@@ -101,6 +101,21 @@ void main() {
     vNorm     = side;
     vArcPx    = arc + cap;
     vREff     = rEff;
+#ifdef VULKAN
+    // Flat varyings come from the provoking vertex, and the two APIs disagree
+    // on which one that is: GL takes a triangle-strip triangle's *last*
+    // vertex (i + 2), Vulkan -- and Metal under MoltenVK -- its first (i).
+    // vREff is the one flat value that changes along a stroke, through the
+    // tip taper, so without this a Vulkan build draws the caps a slightly
+    // different width. Emitting here what vertex i + 2 would have emitted
+    // makes the first-vertex convention pick up GL's value.
+    {
+        uint j = min((uint(gl_VertexID) + 2u) >> 1, vc - 1u);
+        float uj = vrad(stroke, j).y / max(h.totalLen, 1e-6);
+        float tj = (TEX_STRENGTH > 0.0) ? taperAt(uj, clamp(TEX_TAPER, 0.0, 1.0)) : 1.0;
+        vREff = vrad(stroke, j).x * tj;
+    }
+#endif
     vRadius   = radius;
     vTotalLen = h.totalLen;
     vTexHash  = h.layerTex >> 16;

@@ -1,5 +1,5 @@
 #pragma once
-#include "gl_util.h"
+#include "gpu.h"
 #include "params.h"
 
 #include <string>
@@ -52,7 +52,7 @@ public:
     bool setSource(const unsigned char* rgba, int w, int h);
 
     // GPU-only input path for live Spout frames. The texture must be RGBA8.
-    bool setSourceTexture(GLuint texture, int w, int h);
+    bool setSourceTexture(gpu::Texture texture);
 
     // (Re)generates the brush tiles for a set of radii. Called whenever the
     // radii or bristle density change; costs well under a millisecond.
@@ -68,10 +68,6 @@ public:
     // Reads the canvas back as RGBA8, top-row-first.
     std::vector<unsigned char> readCanvas() const;
 
-    void blitToScreen(int x, int y, int w, int h, int fbW, int fbH,
-                      ViewMode mode = ViewMode::Painted,
-                      const ViewXform& xf = ViewXform{}) const;
-
     bool reloadShaders(std::string* err);
     void dumpStrokes(int n) const;
 
@@ -81,7 +77,7 @@ public:
 
     // Re-reads the stroke counters for the frame just rendered. render() picks
     // them up a frame late on purpose, so the interactive path never stalls;
-    // call this after glFinish() when a one-off render's own numbers are
+    // call this after gpu::finish() when a one-off render's own numbers are
     // wanted, as the headless and frame-sequence paths do.
     void refreshStats();
 
@@ -122,7 +118,8 @@ public:
 
     int width() const { return m_w; }
     int height() const { return m_h; }
-    GLuint canvasTexture() const { return m_canvasTex; }
+    gpu::Texture canvasTexture() const { return m_canvasTex; }
+    gpu::Texture sourceTexture() const { return m_srcTex; }
 
     // --- telemetry ---
     // Stages 2-5 run once per (layer, chunk), so each figure is the whole
@@ -153,7 +150,7 @@ private:
     void readStats();
 
     // Separable Gaussian, src -> dst via the scratch target.
-    void gaussian(GLuint srcTex, GLuint dstTex);
+    void gaussian(gpu::Texture srcTex, gpu::Texture dstTex);
     // Repaints the canvas from the stroke pool alone: underpaint, then every
     // pooled stroke. Relaxation needs this because it moves strokes that were
     // already composited.
@@ -178,37 +175,38 @@ private:
 
     int m_w = 0, m_h = 0;
 
-    glu::Program m_blur, m_features, m_error, m_seeds, m_trace, m_stroke,
+    gpu::Program m_blur, m_features, m_error, m_seeds, m_trace, m_stroke,
                  m_impasto, m_canvasProg, m_pool, m_relax, m_energy, m_etf, m_flow;
 
-    GLuint m_srcTex = 0, m_refTex = 0, m_tmpTex = 0, m_tensorTex = 0;
-    GLuint m_gradTex = 0, m_errTex = 0, m_diffTex = 0;
+    gpu::Texture m_srcTex = nullptr, m_refTex = nullptr, m_tmpTex = nullptr;
+    gpu::Texture m_tensorTex = nullptr, m_gradTex = nullptr, m_errTex = nullptr;
+    gpu::Texture m_diffTex = nullptr;
     // ETF ping-pongs the direction field between m_gradTex and this one.
-    GLuint m_etfTex = 0;
+    gpu::Texture m_etfTex = nullptr;
     // Optical flow. The luma pyramids are full resolution with mips; the
     // field itself is a quarter of that, and ping-pongs between two.
-    GLuint m_lumaPrevTex = 0, m_lumaCurTex = 0;
-    GLuint m_flowTex = 0, m_flowTmpTex = 0;
+    gpu::Texture m_lumaPrevTex = nullptr, m_lumaCurTex = nullptr;
+    gpu::Texture m_flowTex = nullptr, m_flowTmpTex = nullptr;
     int m_flowW = 0, m_flowH = 0;
     bool m_flowValid = false;
-    GLuint m_canvasTex = 0, m_heightTex = 0, m_canvasFbo = 0, m_srcFbo = 0;
-    GLuint m_prevSrcTex = 0, m_prevCanvasTex = 0, m_underTex = 0;
+    gpu::Texture m_canvasTex = nullptr, m_heightTex = nullptr;
+    gpu::Framebuffer m_canvasFb = nullptr;
+    gpu::Texture m_prevSrcTex = nullptr, m_prevCanvasTex = nullptr, m_underTex = nullptr;
     bool m_underValid = false;
-    GLuint m_brushTex = 0;
+    gpu::Texture m_brushTex = nullptr;
 
-    GLuint m_paramsUbo = 0;
-    GLuint m_cellBuf = 0, m_seedBuf = 0, m_vertexBuf = 0;
-    GLuint m_headerBuf = 0, m_counterBuf = 0, m_indirectBuf = 0;
+    gpu::Buffer m_cellBuf = nullptr, m_seedBuf = nullptr, m_vertexBuf = nullptr;
+    gpu::Buffer m_headerBuf = nullptr, m_counterBuf = nullptr, m_indirectBuf = nullptr;
     // Frame-wide stroke pool: every stroke of the frame, for relaxation.
-    GLuint m_poolVertexBuf = 0, m_poolHeaderBuf = 0, m_poolCounterBuf = 0;
-    GLuint m_energyBuf = 0;
+    gpu::Buffer m_poolVertexBuf = nullptr, m_poolHeaderBuf = nullptr;
+    gpu::Buffer m_poolCounterBuf = nullptr;
+    gpu::Buffer m_energyBuf = nullptr;
     // One uint: the frame's maximum gradient magnitude, for ETF's w_m.
-    GLuint m_etfMaxBuf = 0;
+    gpu::Buffer m_etfMaxBuf = nullptr;
     // Per (layer, chunk) traced-stroke counts, written by a GPU-side copy and
     // read back at the top of the next frame -- by then the data is already
     // resolved, so the read never stalls the pipeline.
-    GLuint m_statsBuf = 0;
-    GLuint m_vao = 0;
+    gpu::Buffer m_statsBuf = nullptr;
     uint32_t m_cellCapacity = 0;
 
     std::vector<int> m_brushRows;     // used rows per radius index
@@ -226,7 +224,7 @@ private:
     double m_relaxMeanPts = 0.0, m_relaxMeanRadius = 0.0, m_relaxTotalArea = 0.0;
     std::vector<double> m_relaxLog;
 
-    glu::GpuTimer m_tRef, m_tError, m_tSeeds, m_tTrace, m_tRaster, m_tImpasto,
+    gpu::Timer m_tRef, m_tError, m_tSeeds, m_tTrace, m_tRaster, m_tImpasto,
                   m_tRelax, m_tEtf, m_tFlow;
 
     // Each GPU timer reads a frame late, so summing its lastMs after every
@@ -235,7 +233,7 @@ private:
     struct StageTimes { double ref, error, seeds, trace, raster, impasto,
                         relax, etf, flow; };
     StageTimes m_ms{};
-    void endStage(glu::GpuTimer& t, double& acc) { t.end(); acc += t.lastMs; }
+    void endStage(gpu::Timer& t, double& acc) { t.end(); acc += t.lastMs; }
     uint32_t m_lastStrokes = 0, m_lastDrawn = 0, m_lastPoints = 0;
     std::vector<LayerStats> m_layers;
 };

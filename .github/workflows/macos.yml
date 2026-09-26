@@ -1,0 +1,89 @@
+name: macOS build
+
+# The macOS build cannot be exercised anywhere but a Mac, so it is built and
+# run here on GitHub's Apple Silicon runners (macos-14 is an M1), the same
+# way a user would: Homebrew dependencies, tools/build-mac.sh, then renders
+# through MoltenVK and the Syphon bridge end to end.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos-apple-silicon:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies (Homebrew)
+        run: brew install ninja glfw glslang molten-vk vulkan-loader vulkan-headers ffmpeg
+
+      - name: Build
+        run: tools/build-mac.sh --no-deps
+
+      - name: GPU
+        run: system_profiler SPDisplaysDataType || true
+
+      - name: Headless render
+        run: |
+          mkdir -p ci
+          build/gpu-sbr --headless --out ci/still.png
+          test -s ci/still.png
+
+      - name: Feature sweep
+        run: |
+          build/gpu-sbr --headless --out ci/relax.png --relax 3 --relax-remove 1 --relax-log
+          build/gpu-sbr --headless --out ci/etf-impasto.png --etf 2 --etf-log --impasto 0.3 --impasto-light 0.3
+          build/gpu-sbr --headless --out ci/pointillist.png --preset pointillist
+          build/gpu-sbr --headless --out ci/tensor.png --tensor-sigma 2 --debug-cells
+
+      - name: Video and batch
+        run: |
+          ffmpeg -v error -f lavfi -i testsrc2=size=640x360:rate=12 \
+                 -f lavfi -i sine=frequency=440 -t 2 \
+                 -c:v libx264 -pix_fmt yuv420p -c:a aac ci/clip.mp4
+          build/gpu-sbr --video ci/clip.mp4 --out ci/painted.mp4 --temporal-diff 12 --flow 3
+          ffprobe -v error -show_entries stream=codec_type,nb_frames -of csv ci/painted.mp4
+          mkdir -p ci/stills && cp ci/still.png ci/relax.png ci/stills/
+          build/gpu-sbr --batch ci/stills --outdir ci/batch --format jpg
+
+      - name: Syphon bridge (TouchDesigner live path)
+        run: build/paintify-syphon-smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-renders
+          path: ci/
+
+  linux-vulkan:
+    # The Vulkan backend on Mesa's software rasteriser, with the validation
+    # layer on: any validation message fails the job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build libglfw3-dev libvulkan-dev glslang-dev \
+               glslang-tools mesa-vulkan-drivers vulkan-validationlayers
+
+      - name: Build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPAINTIFY_GPU=VULKAN
+          cmake --build build
+
+      - name: Render under validation
+        env:
+          PAINTIFY_VK_VALIDATION: "1"
+        run: |
+          mkdir -p ci
+          for args in "" "--relax 2 --relax-remove 1" "--etf 2 --impasto 0.3 --impasto-light 0.3" \
+                      "--preset pointillist"; do
+            build/gpu-sbr --headless --out ci/out.png $args 2> ci/stderr.txt
+            cat ci/stderr.txt
+            if grep -q "\[Vulkan" ci/stderr.txt; then exit 1; fi
+          done

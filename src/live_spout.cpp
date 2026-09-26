@@ -1,7 +1,14 @@
-#include "live_spout.h"
+#include "live.h"
 
+#ifdef _WIN32
+// glad before anything else that might pull in the system GL headers.
 #include <glad/glad.h>
+#include <SpoutGL/Spout.h>
 #include <GLFW/glfw3.h>
+
+#include "display.h"
+#include "gpu_gl.h"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -10,10 +17,9 @@
 #include <thread>
 
 #ifdef _WIN32
-#include <SpoutGL/Spout.h>
-
-int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
-                 const RenderConfig& render, const LiveSpoutConfig& live) {
+int runLive(Pipeline& pipe, TuningParams params, const RenderConfig& render,
+            const LiveConfig& live) {
+    GLFWwindow* window = display::window();
     Spout receiver;
     Spout sender;
     HANDLE parentProcess = live.parentPid ?
@@ -21,7 +27,7 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
     receiver.SetReceiverName(live.inputName.c_str());
     sender.SetSenderName(live.outputName.c_str());
 
-    GLuint inputTexture = 0;
+    gpu::Texture inputTexture = nullptr;
     int width = 0, height = 0;
     bool havePainting = false;
     bool announced = false;
@@ -70,36 +76,33 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
             width = int(receiver.GetSenderWidth());
             height = int(receiver.GetSenderHeight());
             if (width <= 0 || height <= 0) continue;
-            glCreateTextures(GL_TEXTURE_2D, 1, &inputTexture);
-            glTextureStorage2D(inputTexture, 1, GL_RGBA8, width, height);
+            inputTexture = gpu::createTexture2D(width, height, gpu::Format::RGBA8);
             receiver.IsUpdated(); // reset Spout's resize flag
             havePainting = false;
             pipe.resetTemporal();
         }
 
-        if (!receiver.ReceiveTexture(inputTexture, GL_TEXTURE_2D)) {
-            glDeleteTextures(1, &inputTexture);
-            inputTexture = 0;
+        if (!receiver.ReceiveTexture(gpu::gl::textureId(inputTexture), GL_TEXTURE_2D)) {
+            gpu::destroy(inputTexture);
             havePainting = false;
             sender.ReleaseSender();
             continue;
         }
         lastConnected = now;
         if (receiver.IsUpdated()) {
-            glDeleteTextures(1, &inputTexture);
-            inputTexture = 0;
+            gpu::destroy(inputTexture);
             havePainting = false;
             sender.ReleaseSender();
             continue;
         }
         if (!receiver.IsFrameNew()) continue;
 
-        if (!pipe.setSourceTexture(inputTexture, width, height)) continue;
+        if (!pipe.setSourceTexture(inputTexture)) continue;
         pipe.render(params, render, havePainting && params.frameDiffThreshold > 0.f);
         havePainting = true;
         params.frame += 1.f;
-        glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
-        if (!sender.SendTexture(pipe.canvasTexture(), GL_TEXTURE_2D,
+        gpu::memoryBarrier(gpu::BarrierTextureFetch | gpu::BarrierFramebuffer);
+        if (!sender.SendTexture(gpu::gl::textureId(pipe.canvasTexture()), GL_TEXTURE_2D,
                                 unsigned(width), unsigned(height))) {
             std::fprintf(stderr, "Spout failed to publish painted frame\n");
         } else if (++paintedFrames % 12 == 0) {
@@ -109,16 +112,17 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
         }
     }
 
-    if (inputTexture) glDeleteTextures(1, &inputTexture);
+    gpu::destroy(inputTexture);
     receiver.ReleaseReceiver();
     sender.ReleaseSender();
     if (parentProcess) CloseHandle(parentProcess);
     return 0;
 }
 #else
-int runLiveSpout(GLFWwindow*, Pipeline&, TuningParams,
-                 const RenderConfig&, const LiveSpoutConfig&) {
-    std::fprintf(stderr, "Live Spout mode is available on Windows only\n");
+// Neither Spout nor Syphon: macOS builds live_syphon.mm instead of this file,
+// so this is Linux, which has no TouchDesigner.
+int runLive(Pipeline&, TuningParams, const RenderConfig&, const LiveConfig&) {
+    std::fprintf(stderr, "Live mode needs Spout (Windows) or Syphon (macOS)\n");
     return 1;
 }
 #endif

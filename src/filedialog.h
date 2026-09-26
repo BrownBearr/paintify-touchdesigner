@@ -8,10 +8,10 @@
 // GetOpenFileName: modern appearance, no MAX_PATH truncation, and folder
 // selection is a flag rather than a separate shell-browse API. ole32 and
 // shell32 are already in MSVC's default link set, so this costs no new
-// dependency.
+// dependency. macOS uses NSOpenPanel / NSSavePanel (filedialog_mac.mm).
 //
-// Every entry point returns empty on cancel or on a non-Windows build, so the
-// caller only ever has to check for empty.
+// Every entry point returns empty on cancel, or on Linux, which has no
+// implementation, so the caller only ever has to check for empty.
 namespace filedialog {
 
 // Call once before any dialog. Safe to call repeatedly.

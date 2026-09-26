@@ -1,17 +1,31 @@
 """Run inside TouchDesigner to create a reusable Paintify.tox component.
 
 Textport: import runpy; runpy.run_path(r'PATH_TO_THIS_FILE')
+
+Works on Windows (Spout) and macOS (Syphon). TouchDesigner's Syphon Spout
+In/Out TOPs use whichever of the two the platform has, so the component is the
+same on both; only the renderer executable differs.
 """
 
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE = ROOT / 'build-live' / 'gpu-sbr.exe'
 TOX = ROOT / 'touchdesigner' / 'Paintify.tox'
 
+if sys.platform == 'darwin':
+    # tools/build-mac.sh builds into build/. A separate build-live/ is
+    # honoured too, for symmetry with the Windows layout.
+    CANDIDATES = [ROOT / 'build-live' / 'gpu-sbr', ROOT / 'build' / 'gpu-sbr']
+    BUILD_HINT = 'run tools/build-mac.sh'
+else:
+    CANDIDATES = [ROOT / 'build-live' / 'gpu-sbr.exe']
+    BUILD_HINT = r'run tools\build-live.bat'
+
+EXE = next((c for c in CANDIDATES if c.is_file()), CANDIDATES[0])
 if not EXE.is_file():
-    raise FileNotFoundError(f'Build the Paintify GPU renderer first: {EXE}')
+    raise FileNotFoundError(f'Build the Paintify GPU renderer first ({BUILD_HINT}): {EXE}')
 
 
 RUNTIME = r'''

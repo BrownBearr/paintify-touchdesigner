@@ -3,13 +3,15 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-#include <glad/glad.h>
+// GLFW for input only: which GPU API draws the window is display_*.cpp's
+// business, and on macOS the system OpenGL header is not wanted here.
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
 
+#include "display.h"
+#include "gpu.h"
 #include "pipeline.h"
 #include "params.h"
 #include "brush_atlas.h"
@@ -17,7 +19,7 @@
 #include "jobs.h"
 #include "filedialog.h"
 #include "paramfile.h"
-#include "live_spout.h"
+#include "live.h"
 
 #include <cmath>
 #include <cstdio>
@@ -80,9 +82,9 @@ void applyPreset(const Preset& pr, TuningParams& p, RenderConfig& cfg, std::stri
 
 struct Options {
     bool headless = false;
-    bool liveSpout = false;
-    std::string spoutIn = "Paintify Input";
-    std::string spoutOut = "Paintify Output";
+    bool live = false;
+    std::string liveIn = "Paintify Input";
+    std::string liveOut = "Paintify Output";
     std::string liveStopFile;
     uint32_t liveParentPid = 0;
     double targetFps = 12.0;
@@ -132,9 +134,14 @@ void usage() {
         "  --in <path>            source image (omitted: synthetic subject)\n"
         "  --out <path>            output PNG for --headless and the S key\n"
         "  --headless              render and exit, no window\n"
-        "  --live-spout            paint live Spout input and publish Spout output\n"
-        "  --spout-in <name>       live input sender name (Paintify Input)\n"
-        "  --spout-out <name>      live output sender name (Paintify Output)\n"
+        "  --live                  paint live frames from TouchDesigner and send\n"
+        "                          the painting back: Spout on Windows, Syphon on\n"
+        "                          macOS. --live-spout and --live-syphon are the\n"
+        "                          same switch.\n"
+        "  --live-in <name>        live input sender name (Paintify Input);\n"
+        "                          also --spout-in / --syphon-in\n"
+        "  --live-out <name>       live output sender name (Paintify Output);\n"
+        "                          also --spout-out / --syphon-out\n"
         "  --target-fps <n>        live painted frames per second (12)\n"
         "  --live-stop-file <path> exit live mode when this file appears\n"
         "  --live-parent-pid <n>  exit if the owning process closes\n"
@@ -223,9 +230,12 @@ Options parseArgs(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if      (a == "--headless")        o.headless = true;
-        else if (a == "--live-spout")      o.liveSpout = true;
-        else if (a == "--spout-in")        o.spoutIn = next(i);
-        else if (a == "--spout-out")       o.spoutOut = next(i);
+        else if (a == "--live" || a == "--live-spout" || a == "--live-syphon")
+                                           o.live = true;
+        else if (a == "--live-in" || a == "--spout-in" || a == "--syphon-in")
+                                           o.liveIn = next(i);
+        else if (a == "--live-out" || a == "--spout-out" || a == "--syphon-out")
+                                           o.liveOut = next(i);
         else if (a == "--target-fps")      o.targetFps = atof(next(i));
         else if (a == "--live-stop-file")   o.liveStopFile = next(i);
         else if (a == "--live-parent-pid")   o.liveParentPid = uint32_t(std::strtoul(next(i), nullptr, 10));
@@ -614,6 +624,18 @@ void updateView(View& v, int fbH, int vx, int vy, int vw, int vh,
                              0.f, float(imgH));
 }
 
+// The control panel's width in window units, and the same width in framebuffer
+// pixels for the blit next to it.
+constexpr float kPanelWidth = 400.f;
+
+int panelPixels(GLFWwindow* win) {
+    int ww = 0, wh = 0, fw = 0, fh = 0;
+    glfwGetWindowSize(win, &ww, &wh);
+    glfwGetFramebufferSize(win, &fw, &fh);
+    const float scale = ww > 0 ? float(fw) / float(ww) : 1.f;
+    return int(std::lround(kPanelWidth * scale));
+}
+
 void printTimings(const Pipeline& pipe, float relaxAreaWeight) {
     // Seeds vs drawn: a stroke that traced to a single point draws nothing, and
     // the gradient-magnitude floor stops the walk at its first step across flat
@@ -679,38 +701,32 @@ void printTimings(const Pipeline& pipe, float relaxAreaWeight) {
 int main(int argc, char** argv) {
     const Options opt = parseArgs(argc, argv);
 
-    if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
-    if (opt.headless || opt.liveSpout) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-
-    GLFWwindow* win = glfwCreateWindow(1600, 900, "gpu-sbr", nullptr, nullptr);
-    if (!win) {
-        fprintf(stderr, "need an OpenGL 4.6 core context\n");
-        glfwTerminate();
+    const bool interactive = !opt.headless && !opt.live;
+    std::string gpuErr;
+    if (!display::open(interactive, 1600, 900, "gpu-sbr", &gpuErr)) {
+        fprintf(stderr, "%s\n", gpuErr.c_str());
         return 1;
     }
-    glfwMakeContextCurrent(win);
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        fprintf(stderr, "glad failed\n");
-        return 1;
-    }
-    glfwSwapInterval(0);   // vsync off: the overlay is meant to show real cost
-    printf("GL %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
+    printf("%s\n", gpu::describe().c_str());
 
+    // One exit path for every mode, so the GPU and the window are always torn
+    // down in the same order.
     Pipeline pipe;
-    if (!pipe.init()) return 1;
+    auto finish = [&](int code) {
+        pipe.shutdown();
+        display::close();
+        return code;
+    };
+    if (!pipe.init()) return finish(1);
     pipe.setDebugCells(opt.debugCells);
     pipe.setRelaxLogging(opt.relaxLog);
     pipe.setEtfLogging(opt.etfLog);
     pipe.setFlowLogging(opt.flowLog);
 
     std::string sourceNote;
-    if (!opt.liveSpout && !loadSource(pipe, opt.in, &sourceNote)) {
+    if (!opt.live && !loadSource(pipe, opt.in, &sourceNote)) {
         fprintf(stderr, "no source image\n");
-        return 1;
+        return finish(1);
     }
 
     TuningParams params;
@@ -747,18 +763,14 @@ int main(int argc, char** argv) {
     }
     applyOverrides(opt, params, cfg, &radiiText);
 
-    if (opt.liveSpout) {
-        LiveSpoutConfig live;
-        live.inputName = opt.spoutIn;
-        live.outputName = opt.spoutOut;
+    if (opt.live) {
+        LiveConfig live;
+        live.inputName = opt.liveIn;
+        live.outputName = opt.liveOut;
         live.fps = opt.targetFps;
         live.stopFile = opt.liveStopFile;
         live.parentPid = opt.liveParentPid;
-        const int result = runLiveSpout(win, pipe, params, cfg, live);
-        pipe.shutdown();
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return result;
+        return finish(runLive(pipe, params, cfg, live));
     }
 
     if (!opt.saveParamsFile.empty()) {
@@ -780,11 +792,11 @@ int main(int argc, char** argv) {
             fprintf(stderr, "%s is not on PATH; --video needs ffmpeg and ffprobe.\n"
                             "Install ffmpeg, or decode to PNGs yourself and use"
                             " --frames.\n", err.c_str());
-            return 1;
+            return finish(1);
         }
         if (!media::probe(opt.videoIn, &info, &err)) {
             fprintf(stderr, "%s\n", err.c_str());
-            return 1;
+            return finish(1);
         }
 
         jobs::VideoSpec spec;
@@ -830,11 +842,7 @@ int main(int argc, char** argv) {
                res.done / std::max(res.wallSeconds, 1e-9), res.gpuMsMean);
         if (!res.ok) fprintf(stderr, "%s\n", res.error.c_str());
         else         printf("wrote %s\n", spec.output.c_str());
-
-        pipe.shutdown();
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return res.ok ? 0 : 1;
+        return finish(res.ok ? 0 : 1);
     }
 
     // ------------------------------------------------------------------
@@ -863,10 +871,7 @@ int main(int argc, char** argv) {
                    (long long)res.done, (long long)res.skipped, res.wallSeconds,
                    res.gpuMsMean);
         }
-        pipe.shutdown();
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return res.ok ? 0 : 1;
+        return finish(res.ok ? 0 : 1);
     }
 
     // ------------------------------------------------------------------
@@ -888,10 +893,7 @@ int main(int argc, char** argv) {
         if (!res.ok) fprintf(stderr, "%s\n", res.error.c_str());
         else printf("mean GPU cost %.2f ms/frame over %lld frames\n",
                     res.gpuMsMean, (long long)res.done);
-        pipe.shutdown();
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return res.ok ? 0 : 1;
+        return finish(res.ok ? 0 : 1);
     }
 
     // ------------------------------------------------------------------
@@ -903,26 +905,23 @@ int main(int argc, char** argv) {
             pipe.render(params, cfg);
             params.frame += 1.f;
         }
-        glFinish();
+        gpu::finish();
         pipe.refreshStats();
         if (opt.dump > 0) pipe.dumpStrokes(opt.dump);
         writePng(opt.out, pipe.readCanvas(), pipe.width(), pipe.height());
         printf("source: %s\n", sourceNote.c_str());
         printTimings(pipe, params.relaxAreaWeight);
-        pipe.shutdown();
-        glfwDestroyWindow(win);
-        glfwTerminate();
-        return 0;
+        return finish(0);
     }
 
     // ------------------------------------------------------------------
     // Interactive
     // ------------------------------------------------------------------
+    GLFWwindow* win = display::window();
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(win, true);
-    ImGui_ImplOpenGL3_Init("#version 460");
+    display::imguiInit();
 
     filedialog::init();
 
@@ -988,14 +987,17 @@ int main(int argc, char** argv) {
         glfwGetFramebufferSize(win, &fbW, &fbH);
         // Reserve the left column for the panel so the image is never hidden
         // behind it -- the whole point of the split view is seeing the input.
-        const int panelW = 400;
+        // The panel is sized in window units and the blit in framebuffer
+        // pixels; on a Retina display those differ by 2x, and using one for
+        // the other puts half the panel over the painting.
+        const int panelW = panelPixels(win);
 
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
+        display::imguiNewFrame();
         ImGui::NewFrame();
 
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(400, float(fbH)), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(kPanelWidth, ImGui::GetIO().DisplaySize.y),
+                                 ImGuiCond_Always);
         ImGui::Begin("gpu-sbr", nullptr,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse);
@@ -1320,9 +1322,6 @@ int main(int argc, char** argv) {
                              ? ViewMode::Source : view;
 
         ImGui::Render();
-        pipe.blitToScreen(panelW, 0, fbW - panelW, fbH, fbW, fbH, shown, viewCtl.xf);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
         static bool sDown = false;
         const bool s = glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS &&
                        !ImGui::GetIO().WantCaptureKeyboard;
@@ -1332,7 +1331,8 @@ int main(int argc, char** argv) {
         }
         sDown = s;
 
-        glfwSwapBuffers(win);
+        display::present(pipe, {panelW, 0, fbW - panelW, fbH}, shown, viewCtl.xf,
+                         ImGui::GetDrawData());
         cpuMs = (glfwGetTime() - t0) * 1000.0;
 
         // Re-seek the video preview once the scrub slider is released.
@@ -1363,13 +1363,13 @@ int main(int argc, char** argv) {
 
                 int w = 0, h = 0;
                 glfwGetFramebufferSize(win, &w, &h);
-                pipe.blitToScreen(panelW, 0, w - panelW, h, w, h, view, viewCtl.xf);
+                const int pw = panelPixels(win);
 
-                ImGui_ImplOpenGL3_NewFrame();
-                ImGui_ImplGlfw_NewFrame();
+                display::imguiNewFrame();
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-                ImGui::SetNextWindowSize(ImVec2(400, float(h)), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(kPanelWidth, ImGui::GetIO().DisplaySize.y),
+                                         ImGuiCond_Always);
                 ImGui::Begin("gpu-sbr", nullptr,
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoCollapse);
@@ -1383,8 +1383,8 @@ int main(int argc, char** argv) {
                 if (ImGui::Button("Cancel", ImVec2(-1, 0))) gui.cancel = true;
                 ImGui::End();
                 ImGui::Render();
-                ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-                glfwSwapBuffers(win);
+                display::present(pipe, {pw, 0, w - pw, h}, view, viewCtl.xf,
+                                 ImGui::GetDrawData());
                 return !gui.cancel;
             };
 
@@ -1441,11 +1441,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
+    display::imguiShutdown();
     ImGui::DestroyContext();
-    pipe.shutdown();
-    glfwDestroyWindow(win);
-    glfwTerminate();
-    return 0;
+    return finish(0);
 }

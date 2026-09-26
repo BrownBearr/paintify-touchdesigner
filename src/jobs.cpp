@@ -4,14 +4,19 @@
 #include <stb_image.h>
 #include <stb_image_write.h>
 
-#include <GLFW/glfw3.h>
-
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 
 namespace jobs {
 namespace {
+
+// Wall-clock seconds. Not glfwGetTime: a headless Vulkan run never starts GLFW.
+double now() {
+    using clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+}
 
 // Renders one already-uploaded source frame and waits for it, so the readback
 // and the stats are this frame's rather than the previous one's.
@@ -19,7 +24,7 @@ void renderOne(Pipeline& pipe, TuningParams& params, const RenderConfig& cfg,
                bool temporal) {
     pipe.render(params, cfg, temporal);
     params.frame += 1.f;
-    glFinish();
+    gpu::finish();
     pipe.refreshStats();
 }
 
@@ -46,7 +51,7 @@ void writeImage(const std::string& path, const std::vector<unsigned char>& px,
 Result runVideo(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
                 const VideoSpec& spec, const ProgressFn& onProgress) {
     Result r;
-    const double t0 = glfwGetTime();
+    const double t0 = now();
 
     std::string missing;
     if (!media::haveFfmpeg(&missing)) {
@@ -104,7 +109,7 @@ Result runVideo(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
     // the container or the file is unplayable.
     const bool encoded = writer.close();
 
-    r.wallSeconds = glfwGetTime() - t0;
+    r.wallSeconds = now() - t0;
     r.gpuMsMean = r.done ? totalMs / double(r.done) : 0.0;
     r.ok = encoded && r.error.empty();
     if (!encoded && r.error.empty())
@@ -116,7 +121,7 @@ Result runBatch(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
                 const BatchSpec& spec, const ProgressFn& onProgress) {
     namespace fs = std::filesystem;
     Result r;
-    const double t0 = glfwGetTime();
+    const double t0 = now();
 
     std::vector<std::string> files = spec.files;
     if (files.empty() && !spec.dir.empty()) files = media::listImages(spec.dir);
@@ -164,7 +169,7 @@ Result runBatch(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
         if (!report(onProgress, p)) { r.cancelled = true; break; }
     }
 
-    r.wallSeconds = glfwGetTime() - t0;
+    r.wallSeconds = now() - t0;
     r.gpuMsMean = r.done ? totalMs / double(r.done) : 0.0;
     r.ok = r.done > 0;
     if (!r.ok && r.error.empty()) r.error = "every image failed to load";
@@ -175,7 +180,7 @@ Result runFrames(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
                  const FramesSpec& spec, const ProgressFn& onProgress) {
     namespace fs = std::filesystem;
     Result r;
-    const double t0 = glfwGetTime();
+    const double t0 = now();
 
     const std::vector<std::string> frames = media::listImages(spec.dir);
     if (frames.empty()) {
@@ -218,7 +223,7 @@ Result runFrames(Pipeline& pipe, TuningParams params, const RenderConfig& cfg,
         if (!report(onProgress, p)) { r.cancelled = true; break; }
     }
 
-    r.wallSeconds = glfwGetTime() - t0;
+    r.wallSeconds = now() - t0;
     r.gpuMsMean = r.done ? totalMs / double(r.done) : 0.0;
     r.ok = r.done > 0;
     if (!r.ok && r.error.empty()) r.error = "no frames could be loaded";

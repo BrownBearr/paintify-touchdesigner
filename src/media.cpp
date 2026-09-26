@@ -5,13 +5,20 @@
 #include <cstring>
 #include <filesystem>
 
+// Frames cross the pipe as raw bytes, so Windows needs its binary modes.
+// POSIX popen() accepts only "r" and "w" -- it rejects "rb" outright, which
+// is what used to make video fail to open anywhere but Windows.
 #ifdef _WIN32
 #include <io.h>
 #define SBR_POPEN  _popen
 #define SBR_PCLOSE _pclose
+#define SBR_READ   "rb"
+#define SBR_WRITE  "wb"
 #else
 #define SBR_POPEN  popen
 #define SBR_PCLOSE pclose
+#define SBR_READ   "r"
+#define SBR_WRITE  "w"
 #endif
 
 namespace media {
@@ -138,7 +145,7 @@ bool Reader::open(const std::string& path, int w, int h, std::string* err) {
     const std::string cmd =
         "ffmpeg -v error -nostdin -i " + q(path) +
         " -f rawvideo -pix_fmt rgba -vsync 0 -";
-    m_pipe = SBR_POPEN(shellWrap(cmd).c_str(), "rb");
+    m_pipe = SBR_POPEN(shellWrap(cmd).c_str(), SBR_READ);
     if (!m_pipe) {
         if (err) *err = "could not start ffmpeg to read " + path;
         return false;
@@ -195,7 +202,7 @@ bool Writer::open(const std::string& path, int w, int h, const EncodeOptions& op
     // decode anything else.
     cmd += " -pix_fmt yuv420p -movflags +faststart " + q(path);
 
-    m_pipe = SBR_POPEN(shellWrap(cmd).c_str(), "wb");
+    m_pipe = SBR_POPEN(shellWrap(cmd).c_str(), SBR_WRITE);
     if (!m_pipe) {
         if (err) *err = "could not start ffmpeg to write " + path;
         return false;
@@ -270,7 +277,7 @@ bool readFrameAt(const std::string& path, double seconds, int w, int h,
         "ffmpeg -v error -nostdin -ss " + std::string(ss) + " -i " + q(path) +
         " -frames:v 1 -f rawvideo -pix_fmt rgba -";
 
-    FILE* p = SBR_POPEN(shellWrap(cmd).c_str(), "rb");
+    FILE* p = SBR_POPEN(shellWrap(cmd).c_str(), SBR_READ);
     if (!p) return false;
 
     const size_t want = size_t(w) * size_t(h) * 4;
