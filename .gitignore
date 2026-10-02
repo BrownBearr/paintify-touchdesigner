@@ -13,3 +13,6 @@ task.md
 imgui.ini
 __pycache__/
 touchdesigner/Paintify.tox
+
+# Python bytecode / stale local TOX copies
+*.pyc

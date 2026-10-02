@@ -190,7 +190,7 @@ and the feedback does not exist: nothing in the layer has been painted when the
 strokes trace. Measured, that is mean 5.44 points per stroke against the web's
 7.03. With `passesPerLayer` passes, a stroke in pass *k* sees the paint from
 passes 0..*k*-1, and eight passes lands within 1% of the web version — see
-`docs/comparison.md` for the sweep.
+`comparison.md` for the sweep.
 
 Cells are assigned to passes **by hash**, not by index. Contiguous subsets would
 each cover a horizontal band and show their seams where strokes overlap;

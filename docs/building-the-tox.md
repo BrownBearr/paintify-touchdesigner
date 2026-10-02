@@ -1,4 +1,6 @@
-# Paintify for TouchDesigner
+# Building the Paintify TOX
+
+End users only need `Paintify.tox` from the repository root (see the main README). This page is for maintainers.
 
 Paintify is a Windows TouchDesigner component with one TOP input and one TOP
 output. It paints incoming images or video on the GPU and shares textures with
@@ -20,7 +22,7 @@ its startup callback still runs. On exit or component deletion, it stops its
 renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
 Spout support are required. The TOX is Windows-only because the bundled
 renderer is a Windows executable. A Mac build would need a native GPU
-renderer and Syphon integration; this Windows TOX does not run on macOS. See the [macOS feasibility and port plan](../docs/macos-touchdesigner-feasibility.md).
+renderer and Syphon integration; this Windows TOX does not run on macOS. See the [macOS feasibility and port plan](macos-touchdesigner-feasibility.md).
 
 ## For maintainers: build the TOX
 
@@ -31,14 +33,13 @@ renderer and Syphon integration; this Windows TOX does not run on macOS. See the
 3. Open **Dialogs → Textport**, set it to Python, and run:
 
    ```python
-   import runpy; runpy.run_path(r'C:\Users\I3row\paintify-touchdesigner\touchdesigner\install_paintify.py')
+   import runpy; runpy.run_path(r'<path-to-repo>\touchdesigner\install_paintify.py')
    ```
 
-   Replace the path if the repository lives elsewhere.
+   Replace `<path-to-repo>` with your checkout.
 
 4. The script creates `Paintify.tox` with all runtime files in
-   its virtual file system. Upload this single file as a GitHub release asset.
-   Keep source and build scripts in the repository for maintainability.
+   its virtual file system. Commit it at the repository root; that file is the only thing users download.
 
 The installer replaces a component named `paintify` in `/project1`, so build
 the release TOX in a blank project.
