@@ -1,44 +1,97 @@
-# macOS TouchDesigner feasibility
+# macOS
 
-Status: researched, not implemented or tested on macOS. The current `Paintify.tox` is a Windows package.
+Status: **implemented, never compiled or run on a Mac.** It was written on a
+Linux machine with no access to Apple's toolchain. The shader translation was
+checked there (glslang and spirv-cross run clean over every shader); the
+Objective-C++ host code, the Metal shader compile, Syphon and the TouchDesigner
+wiring were not. Expect a round of build and runtime fixes on first contact.
 
-## Conclusion
+## Why it is a separate renderer
 
-A macOS component with the same painting controls and algorithms is technically feasible on a supported Mac, especially Apple Silicon. It requires a native GPU renderer and a Syphon video bridge. The present Windows `.exe`, DLLs, OpenGL 4.6 shaders, and Spout bridge cannot be relabeled as a Mac `.tox`. Visual and performance parity remain unproven until the port is built and compared on Mac hardware.
+macOS stops at OpenGL 4.1, which has no compute shaders, and the Windows
+renderer is thirteen compute shaders on OpenGL 4.6. So the Mac build is a Metal
+port of the same pipeline, not a recompile:
 
-TouchDesigner itself supports macOS and provides Syphon Spout In/Out TOPs: Spout is the Windows route; Syphon is the macOS route. Apple documents Metal compute and GPU-generated indirect draw commands, which cover the core classes of work used by Paintify. These APIs make a port plausible; they do not automatically translate this project's shaders or guarantee identical output.
-
-## Current code versus a Mac port
-
-| Feature | Current Windows component | macOS work needed |
+| | Windows | macOS |
 | --- | --- | --- |
-| TOP input and output | Spout sender/receiver in `src/live_spout.cpp` | SyphonMetalClient and SyphonMetalServer, with unique sender names per component |
-| Painting presets and Look dropdown | Python parameters in `touchdesigner/install_paintify.py` plus shared renderer parameters | Preserve the same menu and parameter names; feed the Mac renderer the same values |
-| Advanced controls and live changes | Settings file consumed by the running Windows renderer | Reuse the control protocol and implement its application in the Mac renderer without process restarts |
-| Stroke placement, tracing, relaxation, optical flow, texture, impasto | OpenGL 4.6 compute shaders in `shaders/` and `src/pipeline.cpp` | Port shaders and resource/synchronization logic to Metal; compare output and timing for every look |
-| GPU-generated stroke draw | OpenGL indirect draw in `src/pipeline.cpp` | Metal indirect draw/command buffer equivalent; check device feature support at runtime |
-| Single drag-and-drop TOX | Embedded Windows `.exe`, DLLs, GLSL shaders | Embed a signed/notarized Mac executable, libraries/frameworks, and Metal shader assets; use a Mac cache path and extraction permissions |
+| Renderer | OpenGL 4.6, `src/pipeline.cpp` | Metal, `mac/metal_pipeline.mm` |
+| Shaders | `shaders/*.comp *.vert *.frag` | the same files, translated at build time |
+| Video I/O | Spout, `src/live_spout.cpp` | Syphon, `mac/syphon_live.mm` |
+| Executable | `gpu-sbr.exe` | `paintify-mac` |
+| Options, presets, settings file | `src/options.cpp` | the same file |
 
-The existing renderer requests an OpenGL 4.6 context in `src/main.cpp`, uses GLSL 4.60 compute shaders, and routes live I/O through a Windows-only Spout implementation. Apple supports OpenGL only through 4.1 on macOS and recommends Metal. TouchDesigner's own Vulkan/MoltenVK renderer does not make the separate `gpu-sbr` executable's OpenGL 4.6 context available on Mac.
+The GLSL stays the single source of truth. `tools/glsl2msl.py` rewrites the
+OpenGL-only constructs, runs glslang (GLSL to SPIR-V) and spirv-cross (SPIR-V to
+MSL), and `mac/CMakeLists.txt` compiles the result into `paintify.metallib`. The
+`#ifdef SBR_METAL` blocks in a few shaders cover what has no Metal equivalent:
+`.length()` on unsized buffers, read-write storage textures, and the framebuffer
+y direction.
 
-Syphon's Metal API can receive and publish `MTLTexture` frames. TouchDesigner's Syphon Spout Out TOP documents an 8-bit RGBA Syphon limit, so a high-precision TouchDesigner input would be quantized at the interchange boundary. Paintify's internal Metal pipeline could still use float/half-float textures. Confirm color space, alpha, vertical orientation, resize/reconnect behavior, and frame timing in a Mac prototype.
+Not ported: the interactive GUI, video and batch modes, and the diagnostic
+readbacks (energy, flow coherence, stroke dumps). A single still image does work
+(`paintify-mac --in photo.jpg --out painted.png`), which is the quickest way to
+check the renderer without TouchDesigner.
 
-## Recommended implementation sequence
+## Build
 
-1. Target an Apple Silicon Mac supported by TouchDesigner 2025 (macOS 13 or newer). Keep Intel/AMD as a later validation target. Derivative recommends Apple Silicon and requires a discrete AMD GPU for supported Intel Macs.
-2. Build a minimal native Metal process that receives one Syphon frame and publishes it unchanged. Verify `Video Device In TOP -> Syphon Spout Out TOP -> process -> Syphon Spout In TOP -> out1`, including reconnect and resize.
-3. Port the 13 compute shaders and stroke draw shaders to Metal, mapping image/buffer formats, atomics, workgroup barriers, pass ordering, and indirect draw. Keep the existing parameter schema and presets shared where practical.
-4. Add temporal painting, optical flow, relaxation, impasto, and the full Advanced page. Feed live settings to the running process using the current settings-file protocol.
-5. Compare still frames against Windows for all five Looks and important Advanced settings; compare videos for temporal stability and test live input at multiple resolutions/FPS. Record acceptable visual tolerance and performance on actual Mac hardware.
-6. Package a separate macOS `Paintify.tox` with its native dependencies. Test it by dragging into a blank TouchDesigner project on a clean Mac. Verify code signing/notarization and first-run extraction/launch before calling it a one-file install.
+Needs a Mac with full Xcode (the Metal compiler is not in the Command Line
+Tools) and:
 
-A separate Mac TOX is the lowest-risk release shape because a binary-only Windows TOX cannot run on macOS. The TouchDesigner UI can stay effectively the same. The main uncertainty is engineering and validation effort, especially shader equivalence and real-time performance; there is no tested Mac build in this repository today.
+```sh
+brew install cmake glslang spirv-cross
+tools/build-mac.sh --test
+```
+
+The script builds Syphon.framework from source (override with
+`SYPHON_FRAMEWORK_DIR` or `SYPHON_REF`), builds the renderer into `build-mac/`,
+ad-hoc signs it, writes `build-mac/paintify-mac-runtime.tar`, and with `--test`
+paints the built-in subject to `build-mac/test.png`. Set `CODESIGN_IDENTITY` to
+sign with a Developer ID instead.
+
+Then bundle it: run `touchdesigner/install_paintify.py` in TouchDesigner on the
+Mac (see [Building the TOX](building-the-tox.md)). The TOX stores the tarball
+and extracts it to `~/Library/Caches/Paintify/<bundle-id>/` on first load.
+
+## Verifying it
+
+1. `tools/build-mac.sh --test`, open `build-mac/test.png`. Compare with the
+   Windows renderer's still of the same subject (`gpu-sbr --headless`). The
+   shaders are the same, so differences point at the host port.
+2. Drag the TOX into TouchDesigner: `Video Device In TOP -> Paintify -> Null`.
+3. Try each Look, then relaxation (`Relaxation iterations` > 0) and optical flow
+   (`Optical flow levels` > 0). Those exercise the paths that need CPU readbacks
+   and mipmapped luma textures, which are the likeliest to need fixes.
+
+## Things most likely to need adjusting
+
+- **Orientation.** Syphon frames are bottom-row-first, Metal textures are
+  top-row-first. The defaults assume the Syphon Metal client hands back the
+  raw bottom-first surface and that publishing with `flipped: YES` makes it
+  upright for TouchDesigner. If the input or output is upside down, use the
+  **macOS: flip Syphon input / output** toggles on the Paintify Advanced page
+  (they map to `--flip-in` / `--flip-out`), then change the defaults in
+  `install_paintify.py` and `mac/syphon_live.h`. The Windows-only
+  `upright_output` flip in the TOX is disabled on macOS.
+- **Syphon API drift.** `mac/syphon_live.mm` uses `SyphonMetalClient`,
+  `SyphonMetalServer` and `SyphonServerDirectory` as documented in
+  [Syphon-Framework](https://github.com/Syphon/Syphon-Framework). The
+  `Syphon.framework` header layout changed between releases; the import is
+  `<Syphon/Syphon.h>`.
+- **Resource binding.** Compute stages bind by the argument indices reflected
+  from the compiled pipeline, and report `no buffer bound at index N` on stderr
+  if a stage needs a buffer the host did not supply. The `Loose*` structs in
+  `mac/metal_pipeline.mm` must match the `Loose` blocks in the generated MSL
+  (`build-mac/mac/msl/*.metal`); `tools/glsl2msl.py` prints each shader's
+  loose-uniform list when it runs.
+- **Colour.** The canvas is RGBA16F; it is converted to 8-bit BGRA only to hand
+  to Syphon, so Syphon's 8-bit interchange is the one quantization point.
+- **GPU families.** Nothing here needs read-write textures or 32-bit float
+  filtering, so Apple Silicon and AMD/Intel Macs with Metal 2.3 should behave
+  alike. A 16x16 threadgroup is the largest used.
 
 ## Primary sources
 
 - [TouchDesigner system requirements](https://docs.derivative.ca/System_Requirements) and [macOS support](https://docs.derivative.ca/MacOS)
 - [TouchDesigner Syphon Spout In TOP](https://docs.derivative.ca/Syphon_Spout_In_TOP) and [Syphon Spout Out TOP](https://docs.derivative.ca/Syphon_Spout_Out_TOP)
-- [TouchDesigner Vulkan/MoltenVK architecture](https://docs.derivative.ca/Release_Notes/2022.20000)
 - [Apple on macOS OpenGL 4.1 and Metal](https://developer.apple.com/videos/play/wwdc2020/10631/)
-- [Apple Metal GPU-generated indirect commands](https://developer.apple.com/documentation/metal/encoding-indirect-command-buffers-on-the-gpu)
 - [SyphonMetalClient](https://github.com/Syphon/Syphon-Framework/blob/main/SyphonMetalClient.h) and [SyphonMetalServer](https://github.com/Syphon/Syphon-Framework/blob/main/SyphonMetalServer.h)

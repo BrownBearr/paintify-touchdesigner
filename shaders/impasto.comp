@@ -12,7 +12,16 @@ layout(local_size_x = 16, local_size_y = 16) in;
 // canvas keeps its colour instead of the whole image being multiplied down.
 
 layout(binding = 0) uniform sampler2D uHeight;
+#ifdef SBR_METAL
+// Metal: read-write storage textures are not available on every Mac GPU, so
+// the host copies the canvas aside and this stage reads the copy.
+layout(binding = 1) uniform sampler2D uCanvasIn;
+layout(rgba16f, binding = 0) uniform writeonly image2D uCanvas;
+#define LOAD_CANVAS(p) texelFetch(uCanvasIn, p, 0)
+#else
 layout(rgba16f, binding = 0) uniform image2D uCanvas;
+#define LOAD_CANVAS(p) imageLoad(uCanvas, p)
+#endif
 
 void main() {
     ivec2 px = ivec2(gl_GlobalInvocationID.xy);
@@ -32,6 +41,6 @@ void main() {
     vec3 N = normalize(vec3(-dzdx, -dzdy, 1.0));
     float light = clamp(1.0 + IMPASTO_LIGHT * gain * (dot(N, L) - L.z), 0.35, 1.8);
 
-    vec4 c = imageLoad(uCanvas, px);
+    vec4 c = LOAD_CANVAS(px);
     imageStore(uCanvas, px, vec4(min(c.rgb * light, vec3(1.0)), c.a));
 }

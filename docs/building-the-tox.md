@@ -2,9 +2,9 @@
 
 End users only need `Paintify.tox` from the repository root (see the main README). This page is for maintainers.
 
-Paintify is a Windows TouchDesigner component with one TOP input and one TOP
-output. It paints incoming images or video on the GPU and shares textures with
-TouchDesigner through Spout.
+Paintify is a TouchDesigner component with one TOP input and one TOP output. It
+paints incoming images or video on the GPU and shares textures with
+TouchDesigner through Spout (Windows) or Syphon (macOS).
 
 ## For users: one-file install
 
@@ -21,8 +21,9 @@ The component starts automatically when loaded. If the timeline is paused,
 its startup callback still runs. On exit or component deletion, it stops its
 renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
 Spout support are required. The TOX is Windows-only because the bundled
-renderer is a Windows executable. A Mac build would need a native GPU
-renderer and Syphon integration; this Windows TOX does not run on macOS. See the [macOS feasibility and port plan](macos-touchdesigner-feasibility.md).
+renderer is a Windows executable; the macOS renderer is a separate Metal build
+(see [macOS](macos-touchdesigner-feasibility.md)). A TOX runs on the platforms
+whose renderer was bundled into it.
 
 ## For maintainers: build the TOX
 
@@ -43,6 +44,18 @@ renderer and Syphon integration; this Windows TOX does not run on macOS. See the
 
 The installer replaces a component named `paintify` in `/project1`, so build
 the release TOX in a blank project.
+
+### One TOX for both platforms
+
+The installer bundles every renderer it finds: the Windows files from
+`build-package\` (or `build-live\`) and the macOS tarball
+`build-mac/paintify-mac-runtime.tar`. To produce a TOX that runs on both,
+build on one machine, copy the other platform's output into the same relative
+path in that checkout, then run the installer there. On macOS:
+
+1. `tools/build-mac.sh` (see [macOS](macos-touchdesigner-feasibility.md)).
+2. Copy `build-package\` from the Windows build into the checkout.
+3. Run the installer in TouchDesigner on the Mac, as above.
 
 ## Controls
 

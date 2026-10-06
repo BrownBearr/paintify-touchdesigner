@@ -74,6 +74,15 @@ layout(std140, binding = 0) uniform Params {
 // region of a video keeps the same strokes instead of boiling.
 uint frameSalt() { return (JITTER_PER_FRAME > 0.5) ? uint(FRAME) : 0u; }
 
+// Unsized buffer arrays have no .length() under Metal, so the Metal build
+// (tools/glsl2msl.py defines SBR_METAL) uses the fixed capacity the host
+// allocates. Keep this equal to SBR_MAX_STROKES in params.h.
+#ifdef SBR_METAL
+#define SEEDS_LEN 200000u
+#else
+#define SEEDS_LEN uint(seeds.length())
+#endif
+
 // Vertices per polyline. Matches the web UI's max-stroke-length cap of 32,
 // plus one for the seed point itself.
 const uint MAX_VERTS = 33u;

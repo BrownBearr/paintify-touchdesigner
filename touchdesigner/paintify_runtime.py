@@ -1,10 +1,20 @@
 """Runtime embedded in Paintify.tox by install_paintify.py."""
 import builtins
 import hashlib
+import io
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
+import tarfile
 import tempfile
+
+IS_MAC = sys.platform == 'darwin'
+# macOS ships the renderer as one tarball: the TOX's virtual file system would
+# lose the executable bit and the framework's symlinks, a tarball keeps both.
+MAC_RUNTIME = 'runtime/mac/runtime.tar'
+MAC_EXECUTABLE = 'paintify-mac'
 
 
 def _registry():
@@ -24,10 +34,58 @@ def names(comp):
     return ('Paintify_' + base + '_input', 'Paintify_' + base + '_output')
 
 
+def _cache_base():
+    if IS_MAC:
+        return Path.home() / 'Library' / 'Caches'
+    return Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir())
+
+
 def _runtime_files(comp):
     return sorted(
-        (item for item in comp.vfs.find() if item.name.startswith('runtime/')),
+        (item for item in comp.vfs.find()
+         if item.name.startswith('runtime/') and not item.name.startswith('runtime/mac/')),
         key=lambda item: item.name)
+
+
+def _safe_members(archive, destination):
+    root = destination.resolve()
+    for member in archive.getmembers():
+        target = (root / member.name).resolve()
+        if root != target and root not in target.parents:
+            raise RuntimeError('Unsafe path in the bundled renderer: ' + member.name)
+        yield member
+
+
+def _prepare_mac(comp):
+    blobs = [item for item in comp.vfs.find() if item.name == MAC_RUNTIME]
+    if not blobs:
+        raise RuntimeError('This Paintify.tox has no macOS renderer bundled. '
+                           'Build it with tools/build-mac.sh and re-run '
+                           'touchdesigner/install_paintify.py on the Mac.')
+    data = bytes(blobs[0].byteArray)
+    digest = hashlib.sha256(data).hexdigest()[:20]
+    runtime_dir = _cache_base() / 'Paintify' / digest
+    marker = runtime_dir / '.complete'
+    if not marker.is_file():
+        staging = runtime_dir.with_name(digest + '.tmp')
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True)
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            members = list(_safe_members(archive, staging))
+            try:
+                archive.extractall(staging, members=members, filter='data')
+            except TypeError:   # Python without extraction filters
+                archive.extractall(staging, members=members)
+        if runtime_dir.exists():
+            shutil.rmtree(runtime_dir)
+        os.replace(staging, runtime_dir)
+        marker.write_text('ok', encoding='utf-8')
+    exe = runtime_dir / MAC_EXECUTABLE
+    if not exe.is_file():
+        raise FileNotFoundError('Bundled Paintify renderer is missing')
+    exe.chmod(0o755)
+    return exe, runtime_dir / 'shaders'
 
 
 def prepare_runtime(comp):
@@ -38,6 +96,9 @@ def prepare_runtime(comp):
             raise FileNotFoundError('Paintify renderer not found: ' + override)
         return exe, None
 
+    if IS_MAC:
+        return _prepare_mac(comp)
+
     files = _runtime_files(comp)
     if not files:
         raise RuntimeError('Paintify.tox has no bundled renderer')
@@ -45,8 +106,7 @@ def prepare_runtime(comp):
     for item in files:
         digest.update(item.name.encode('utf-8'))
         digest.update(item.byteArray)
-    cache_base = Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir())
-    runtime_dir = cache_base / 'Paintify' / digest.hexdigest()[:20]
+    runtime_dir = _cache_base() / 'Paintify' / digest.hexdigest()[:20]
     for item in files:
         relative = Path(item.name).relative_to('runtime')
         destination = runtime_dir / relative
@@ -116,6 +176,13 @@ def renderer_args(comp, exe, stopfile, settingsfile):
         args.extend(('--underpaint', underpaint))
     if comp.par.Jitterperframe.eval():
         args.append('--jitter-per-frame')
+    if IS_MAC:
+        # Syphon frames are bottom-row-first; see the Paintify Advanced page.
+        for parameter, flag, default in (('Flipinput', '--flip-in', True),
+                                         ('Flipoutput', '--flip-out', True)):
+            par = getattr(comp.par, parameter, None)
+            value = par.eval() if par is not None else default
+            args.extend((flag, '1' if value else '0'))
     return args
 
 
@@ -183,7 +250,7 @@ def start(comp):
         return
     exe, shader_dir = prepare_runtime(comp)
     control_dir = (exe.parent if shader_dir is not None else
-                   Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / 'Paintify')
+                   _cache_base() / 'Paintify')
     control_dir.mkdir(parents=True, exist_ok=True)
     stopfile = control_dir / ('paintify-stop-' + str(comp.id) + '.flag')
     settingsfile = control_dir / ('paintify-settings-' + str(comp.id) + '.txt')
@@ -196,11 +263,12 @@ def start(comp):
     env = os.environ.copy()
     if shader_dir is not None:
         env['PAINTIFY_SHADER_DIR'] = str(shader_dir)
-    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    extra = {}
+    if not IS_MAC:
+        extra['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     try:
         proc = subprocess.Popen(args, cwd=str(exe.parent), env=env,
-                                creationflags=flags, stdout=log,
-                                stderr=subprocess.STDOUT)
+                                stdout=log, stderr=subprocess.STDOUT, **extra)
     except Exception:
         log.close()
         raise

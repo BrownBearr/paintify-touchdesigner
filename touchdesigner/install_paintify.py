@@ -9,10 +9,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / ('build-package' if (ROOT / 'build-package' / 'gpu-sbr.exe').is_file() else 'build-live')
 EXE = BUILD / 'gpu-sbr.exe'
+MAC_RUNTIME = ROOT / 'build-mac' / 'paintify-mac-runtime.tar'
 TOX = ROOT / 'Paintify.tox'
 
-if not EXE.is_file():
-    raise FileNotFoundError(f'Build the Paintify GPU renderer first: {EXE}')
+# The TOX carries whichever renderers have been built: the Windows OpenGL one
+# (tools/build-package.bat), the macOS Metal one (tools/build-mac.sh), or both.
+# For a TOX that runs on both, copy the other platform's build output into
+# this checkout before running the installer.
+HAVE_WINDOWS = EXE.is_file()
+HAVE_MAC = MAC_RUNTIME.is_file()
+if not (HAVE_WINDOWS or HAVE_MAC):
+    raise FileNotFoundError(
+        'Build a Paintify renderer first: tools/build-package.bat (Windows) '
+        f'-> {EXE}, or tools/build-mac.sh (macOS) -> {MAC_RUNTIME}')
 
 
 RUNTIME = (Path(__file__).parent / 'paintify_runtime.py').read_text(encoding='utf-8')
@@ -107,6 +116,8 @@ def install():
     advanced.appendInt('Relaxsubpasses', label='Relax subpasses (-1 = default)')
     advanced.appendInt('Flowiters', label='Optical flow iterations (-1 = default)')
     advanced.appendToggle('Jitterperframe', label='Jitter each frame')
+    advanced.appendToggle('Flipinput', label='macOS: flip Syphon input')
+    advanced.appendToggle('Flipoutput', label='macOS: flip Syphon output')
 
     comp.par.Active = True
     comp.par.Executable = ''
@@ -128,6 +139,8 @@ def install():
                  'Relaxsubpasses', 'Flowiters'):
         getattr(comp.par, name).val = -1
     comp.par.Jitterperframe = False
+    comp.par.Flipinput = True
+    comp.par.Flipoutput = True
 
     source = comp.create('inTOP', 'source')
     send = comp.create('syphonspoutoutTOP', 'send_to_paintify')
@@ -137,7 +150,10 @@ def install():
     source.outputConnectors[0].connect(send.inputConnectors[0])
     receive.outputConnectors[0].connect(upright.inputConnectors[0])
     upright.outputConnectors[0].connect(result.inputConnectors[0])
-    upright.par.flipy = True
+    # Spout's sender flips the texture it sends, so on Windows the returned
+    # image comes back upside down. Syphon does not, and the macOS renderer
+    # publishes upright frames, so the flip is Windows-only.
+    upright.par.flipy.expr = "__import__('sys').platform == 'win32'"
     send.par.active = True
     send.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[0]"
     receive.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[1]"
@@ -163,7 +179,8 @@ def install():
                          'Tensorsigma Etf Etfradius Bristledensity Texturetaper '
                          'Drybrush Lightangle Sizejitter Anglejitter Opacityjitter '
                          'Relaxarea Relaxmove Relaxcandidates Relaxremove '
-                         'Relaxsubpasses Flowiters Jitterperframe')
+                         'Relaxsubpasses Flowiters Jitterperframe Flipinput '
+                         'Flipoutput')
     controls.par.valuechange = True
     controls.par.custom = True
     cleanup = comp.create('opexecuteDAT', 'paintify_cleanup')
@@ -171,17 +188,24 @@ def install():
     cleanup.par.op = '..'
     cleanup.par.destroy = True
 
-    for name in ('gpu-sbr.exe', 'glfw3.dll', 'Spout.dll'):
-        path = BUILD / name
-        if not path.is_file():
-            raise FileNotFoundError('Build the Paintify live renderer first: ' + str(path))
-        comp.vfs.addFile(str(path), overrideName='runtime/' + name)
-    for path in sorted((ROOT / 'shaders').glob('*')):
-        if path.is_file():
-            comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
+    if HAVE_WINDOWS:
+        for name in ('gpu-sbr.exe', 'glfw3.dll', 'Spout.dll'):
+            path = BUILD / name
+            if not path.is_file():
+                raise FileNotFoundError('Build the Paintify live renderer first: ' + str(path))
+            comp.vfs.addFile(str(path), overrideName='runtime/' + name)
+        for path in sorted((ROOT / 'shaders').glob('*')):
+            if path.is_file():
+                comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
+    if HAVE_MAC:
+        comp.vfs.addFile(str(MAC_RUNTIME), overrideName='runtime/mac/runtime.tar')
     comp.save(str(TOX), createFolders=True)
-    runtime.module.start(comp)
-    print('Paintify component saved to ' + str(TOX))
+    print('Paintify component saved to ' + str(TOX) + ' (renderers: ' +
+          ', '.join(n for n, have in (('Windows', HAVE_WINDOWS), ('macOS', HAVE_MAC)) if have) + ')')
+    try:
+        runtime.module.start(comp)
+    except Exception as error:   # this machine's renderer may not be bundled
+        print('Paintify did not start here: ' + str(error))
     return comp
 
 

@@ -1,6 +1,7 @@
 build/
 build-live/
 build-package/
+build-mac/
 frames/
 frames_out/
 painted/

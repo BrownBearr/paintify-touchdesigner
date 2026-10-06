@@ -4,6 +4,15 @@ project(gpu-sbr LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# macOS has no OpenGL compute (it stops at GL 4.1), so the Mac build is a
+# separate Metal renderer: see mac/CMakeLists.txt. Everything below is the
+# OpenGL 4.6 renderer.
+if(APPLE)
+    enable_language(OBJCXX)
+    add_subdirectory(mac)
+    return()
+endif()
+
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -21,6 +30,7 @@ add_executable(gpu-sbr
     src/media.cpp
     src/jobs.cpp
     src/filedialog.cpp
+    src/options.cpp
     src/paramfile.cpp
     src/live_spout.cpp
 )

@@ -92,8 +92,15 @@ void main() {
     // store the canvas vertically mirrored relative to every compute stage --
     // and error.comp and trace.comp both sample the canvas by texel. The
     // readback and the on-screen blit do the flip to display orientation.
+#ifdef SBR_METAL
+    // Metal's framebuffer origin is top-left, so texel row 0 is NDC y = +1.
+    // Flipping here keeps the canvas in the same row order as under OpenGL.
+    gl_Position = vec4(pos.x / IMG_SIZE.x * 2.0 - 1.0,
+                       1.0 - pos.y / IMG_SIZE.y * 2.0, 0.0, 1.0);
+#else
     gl_Position = vec4(pos.x / IMG_SIZE.x * 2.0 - 1.0,
                        pos.y / IMG_SIZE.y * 2.0 - 1.0, 0.0, 1.0);
+#endif
 
     vec4 col = unpackUnorm4x8(h.color);
     vColor    = col.rgb;
