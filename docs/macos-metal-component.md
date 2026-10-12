@@ -31,7 +31,8 @@ in the component VFS. They extract into
 `~/Library/Caches/Paintify/TouchDesigner/<bundle-hash>/PaintifyMetal.app`.
 Each component gets a separate renderer and settings file. A watchdog stops
 the worker after deletion; the exit callback stops it when the project closes.
-The **Look Files** page includes status and a per-instance log path.
+The main **Paintify** page shows renderer status, including missing input and
+errors. The **Look Files** page includes a per-instance log path.
 
 Target: Apple Silicon, macOS 13+, TouchDesigner 2025. The development Mac uses
 TouchDesigner 2025.31550 and an M1. Intel and other builds are unverified.

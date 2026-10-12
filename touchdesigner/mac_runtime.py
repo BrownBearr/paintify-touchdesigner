@@ -219,11 +219,14 @@ def cook(script):
     import numpy as np
     comp = script.parent()
     source = script.inputs[0] if script.inputs else None
-    if source is None:
+    if source is None or not comp.inputs:
+        stop(comp)
+        comp.par.Status = "No input"
         script.copyNumpyArray(np.zeros((1, 1, 4), dtype=np.float32))
         return
     if not comp.par.Active.eval():
         stop(comp)
+        comp.par.Status = "Bypass"
         pixels = source.numpyArray(delayed=False)
         if pixels is not None:
             script.copyNumpyArray(pixels)

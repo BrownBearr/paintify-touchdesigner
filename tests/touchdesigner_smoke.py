@@ -60,18 +60,35 @@ try:
     assert comp.id not in runtime.registry()
     # Load the actual distributable again, not only the builder's live object.
     path = Path(__file__).resolve().parents[1] / "Paintify-Mac.tox"
-    loaded = root.loadTox(str(path))
+    relocated = root.create("baseCOMP", "paintify_portability_test")
+    loaded = relocated.loadTox(str(path))
+    loaded.name = "portable_paint"
+    assert loaded.op("metal_paint").par.callbacks.eval() == loaded.op("paint_callbacks"), "Callback points outside the saved component"
+    viewer = loaded.par.opviewer.eval()
+    target = op(viewer) if isinstance(viewer, str) else viewer
+    assert target == loaded.op("painted"), ("Viewer points outside the saved component", repr(viewer))
     assert loaded.op("mac_runtime") is not None and len(loaded.vfs.find()) > 10
     assert loaded.par.Brush.eval() == "tempera"
-    source.outputConnectors[0].connect(loaded.inputConnectors[0])
+    relocated_source = relocated.copy(source)
+    relocated_source.par.callbacks = callbacks.path
+    relocated_source.cook(force=True)
+    relocated_source.outputConnectors[0].connect(loaded.inputConnectors[0])
+    loaded.op("source").cook(force=True)
+    loaded.op("metal_paint").cook(force=True)
     loaded_output = loaded.op("painted")
     loaded_output.cook(force=True)
     reloaded_pixels = loaded_output.numpyArray(delayed=False)
     assert loaded.par.Status.eval() == "Painting", loaded.par.Status.eval()
-    assert reloaded_pixels is not None and reloaded_pixels.shape == (64, 96, 4)
+    assert reloaded_pixels is not None and reloaded_pixels.shape == (64, 96, 4), {
+        "shape": None if reloaded_pixels is None else reloaded_pixels.shape,
+        "input": (loaded.op("source").width, loaded.op("source").height),
+        "paint": (loaded.op("metal_paint").width, loaded.op("metal_paint").height),
+        "errors": loaded.errors(recurse=True),
+    }
     assert float(np.abs(reloaded_pixels - raw).mean()) > .005
     loaded.op("mac_runtime").module.stop(loaded)
     loaded.destroy()
+    relocated.destroy()
     print("PAINTIFY_TOUCHDESIGNER_SMOKE_OK", flush=True)
 finally:
     runtime.stop(comp)

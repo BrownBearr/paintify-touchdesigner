@@ -33,6 +33,7 @@ def install():
     page.appendToggle("Temporal", label="Temporal painting")
     page.appendToggle("Material", label="Brushkit material")
     page.appendPulse("Restart", label="Restart renderer")
+    page.appendStr("Status", label="Renderer status")
     comp.par.Active, comp.par.Brush, comp.par.Radiusset = True, "tempera", "balanced"
     comp.par.Radii, comp.par.Brushsize, comp.par.Fps = "8, 4, 2", 1, 12
     comp.par.Resolution, comp.par.Temporal, comp.par.Material = "100", True, True
@@ -86,7 +87,6 @@ def install():
     files.appendFile("Lookfile", label="Brushkit look (.sbr)")
     files.appendPulse("Loadlook", label="Load look")
     files.appendPulse("Savelook", label="Save look")
-    files.appendStr("Status", label="Renderer status")
     files.appendFile("Logfile", label="Renderer log")
     comp.par.Status = "Ready"
     for name in ("Status", "Logfile"):
@@ -100,13 +100,15 @@ def install():
     painted = comp.create("scriptTOP", "metal_paint")
     callbacks = comp.create("textDAT", "paint_callbacks")
     callbacks.text = "def onCook(scriptOp):\n    scriptOp.parent().op('mac_runtime').module.cook(scriptOp)\n"
-    painted.par.callbacks = callbacks.path
+    painted.par.callbacks = "paint_callbacks"
     source.outputConnectors[0].connect(painted.inputConnectors[0])
     result = comp.create("outTOP", "painted")
     painted.outputConnectors[0].connect(result.inputConnectors[0])
     for i, node in enumerate((source, painted, result)):
         node.nodeX, node.nodeY = i * 220, 0
     result.display, result.viewer = True, True
+    comp.par.opviewer.expr = "me.path + '/painted'"
+    comp.viewer = True
     par_callbacks = comp.create("parameterexecuteDAT", "controls_changed")
     par_callbacks.par.op, par_callbacks.par.pars = "..", "*"
     par_callbacks.par.valuechange, par_callbacks.par.onpulse = True, True
