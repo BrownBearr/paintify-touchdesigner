@@ -1,0 +1,110 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// brushkit fields.py on the GPU: the painter's hand logic, written into the
+// direction field trace.comp already follows. Runs per layer, after Sobel /
+// structure tensor / ETF have built the image's own flow, so every style field
+// can defer to the motif where the motif has something to say.
+//
+// Output keeps trace.comp's contract: (gx, gy, gmag) with the stroke going
+// along perp(g) = (-gy, gx). A style field writes g = (sin a, -cos a) * M so
+// that perp(g) points along angle a, and M is floored at minFieldMag so strokes
+// carry on across flat regions instead of stopping at the gradient floor --
+// brushkit strokes do not die in a clear sky.
+//
+// Orientations are blended in doubled-angle form, so a and a + pi count as the
+// same direction, exactly like fields.py.
+
+layout(binding = 0) uniform sampler2D uGrad;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOut;
+
+const float PI = 3.14159265;
+
+vec2 d2(float a) { return vec2(cos(2.0 * a), sin(2.0 * a)); }
+
+float imgAngle(ivec2 q, out float mag) {
+    ivec2 size = ivec2(IMG_SIZE);
+    vec3 g = texelFetch(uGrad, clamp(q, ivec2(0), size - 1), 0).rgb;
+    mag = g.z;
+    return atan(g.x, -g.y);   // angle of perp(g) = (-gy, gx)
+}
+
+float curlAngle(vec2 p) {
+    float sc = max(ST_CURL_SCALE, 4.0);
+    float e = 1.0;
+    float dx = fbm((p + vec2(e, 0.0)) / sc, 3, 601u) - fbm((p - vec2(e, 0.0)) / sc, 3, 601u);
+    float dy = fbm((p + vec2(0.0, e)) / sc, 3, 601u) - fbm((p - vec2(0.0, e)) / sc, 3, 601u);
+    return atan(-dx, dy);     // streamline of the stream function: (dpsi/dy, -dpsi/dx)
+}
+
+float fallbackAngle(vec2 p) {
+    int m = int(ST_FALLBACK_MODE + 0.5);
+    if (m == 1) return curlAngle(p);
+    if (m == 2) return 0.0;
+    return radians(ST_FALLBACK_ANGLE);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(IMG_SIZE);
+    if (px.x >= size.x || px.y >= size.y) return;
+    vec2 p = vec2(px) + 0.5;
+
+    float mag;
+    float aImg = imgAngle(px, mag);
+    // Where the image's own flow is confident, follow it; elsewhere fall back
+    // to the style's default hand (with_fallback in fields.py).
+    float conf = clamp(mag / max(ST_COHERENCE_MIN, 1e-4), 0.0, 1.0);
+    vec2 acc = d2(aImg) * conf + d2(fallbackAngle(p)) * (1.0 - conf);
+
+    int mode = int(ST_FIELD_MODE + 0.5);
+    float mixW = clamp(ST_FIELD_MIX, 0.0, 1.0);
+    if (mode == 1) {
+        // Turner: tangential flow around the eye, tilted inward so it spirals
+        // rather than rings, fading back to the motif's flow with distance.
+        vec2 c = ST_VORTEX * IMG_SIZE;
+        vec2 dv = p - c;
+        dv.y /= 1.1;
+        float r = length(dv) / max(IMG_SIZE.x, IMG_SIZE.y);
+        float a = atan(dv.y, dv.x) + 0.5 * PI + ST_VORTEX_SPIRAL;
+        float wv = exp(-pow(r / max(ST_VORTEX_RADIUS, 1e-3), 2.0)) * mixW;
+        acc = acc * (0.95 - 0.9 * wv) + d2(a) * (0.05 + 0.9 * wv);
+    } else if (mode == 2) {
+        // Cezanne: piecewise-constant over Voronoi patches. Every hatch inside
+        // one patch takes the angle the flow has at the patch's seed.
+        float cell = max(ST_PATCH_CELL, 2.0);
+        uint id; vec2 fp;
+        worley(p / cell, 701u, id, fp);
+        ivec2 sp = ivec2(fp * cell);
+        float ms;
+        float as_ = imgAngle(sp, ms);
+        float cs = clamp(ms / max(ST_COHERENCE_MIN, 1e-4), 0.0, 1.0);
+        vec2 sd = d2(as_) * cs + d2(fallbackAngle(vec2(sp))) * (1.0 - cs);
+        float a = 0.5 * atan(sd.y, sd.x);
+        a += (hash01(id) * 2.0 - 1.0) * ST_PATCH_JITTER;
+        if (ST_PATCH_QUANT > 0.0) a = floor(a / ST_PATCH_QUANT + 0.5) * ST_PATCH_QUANT;
+        acc = mix(acc, d2(a), mixW);
+    } else if (mode == 3) {
+        // Van Gogh sky: turbulence wherever the motif itself is flat.
+        acc = mix(acc, d2(curlAngle(p)), mixW * (1.0 - conf));
+    } else if (mode == 4) {
+        // Munch: the whole world pulled into undulating bands.
+        float lam = max(ST_WAVE_LEN, 4.0);
+        vec2 dir = vec2(cos(ST_WAVE_ANGLE), sin(ST_WAVE_ANGLE));
+        float ph = 2.0 * PI * dot(p, dir) / lam;
+        float wob = 2.0 * fbm(p / (lam * 2.0), 3, 611u);
+        float a = ST_WAVE_ANGLE + ST_WAVE_AMP * sin(ph + wob) * 0.6;
+        acc = mix(acc, d2(a), mixW * (1.0 - conf));
+    } else if (mode == 5) {
+        acc = mix(acc, d2(radians(ST_FALLBACK_ANGLE)), mixW);
+    }
+
+    float ang = 0.5 * atan(acc.y, acc.x) + layerB().z;   // e.g. pastel cross-hatching
+    if (ST_PERTURB > 0.0) ang += ST_PERTURB * fbm(p / max(ST_PERTURB_SCALE, 4.0), 3, 621u);
+
+    float M = max(mag, ST_MIN_FIELD_MAG);
+    imageStore(uOut, px, vec4(sin(ang) * M, -cos(ang) * M, M, 0.0));
+}

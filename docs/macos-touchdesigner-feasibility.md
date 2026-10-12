@@ -1,6 +1,10 @@
 # macOS TouchDesigner feasibility
 
-Status: researched, not implemented or tested on macOS. The current `Paintify.tox` is a Windows package.
+Status: superseded by the implemented [Metal Mac component](macos-metal-component.md).
+`Paintify-Mac.tox` uses the updated GPU renderer with CPU-buffer TOP exchange.
+The zero-copy Syphon bridge discussed below is still future work.
+The original `Paintify.tox` remains a Windows package. The remainder of this
+document records the earlier feasibility research, not the current implementation.
 
 ## Conclusion
 
