@@ -1,0 +1,95 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// brushkit Canvas.finish: relight the paint surface, then age it.
+//
+// Written to a separate output texture, never back into the canvas. The canvas
+// is the painting *state* -- it is carried to the next video frame and sampled
+// by the error map and the stroke termination test -- so re-lighting or
+// varnishing it in place would compound frame after frame.
+
+layout(binding = 0) uniform sampler2D uColor;    // canvas, or the smeared copy
+layout(binding = 1) uniform sampler2D uHeight;
+layout(binding = 2) uniform sampler2D uTooth;
+layout(rgba16f, binding = 0) uniform writeonly image2D uOut;
+
+ivec2 gSize;
+
+float surf(ivec2 q) {
+    q = clamp(q, ivec2(0), gSize - 1);
+    float h = texelFetch(uHeight, q, 0).r;
+    float t = texelFetch(uTooth, q, 0).r;
+    // thick paint buries the weave; thin paint lets it telegraph through
+    return h * ST_IMPASTO_LIGHT + (ST_FINISH > 0.9 ? ST_WEAVE * t * exp(-1.5 * h) : 0.0);
+}
+
+float crackNetwork(vec2 p) {
+    float cell = max(ST_CRACKLE_SIZE, 4.0);
+    uint id; vec2 fp;
+    vec2 q = p / cell;
+    q += 0.35 * vec2(fbm(q * 1.3 + 5.2, 3, 901u), fbm(q * 1.3 - 3.7, 3, 903u));
+    vec2 f = worley(q, 905u, id, fp);
+    float c1 = exp(-pow((f.y - f.x) / 0.03, 2.0));
+    vec2 q2 = p / (cell * 0.38) + 40.0;
+    q2 += 0.4 * vec2(fbm(q2 * 1.1, 3, 907u), fbm(q2 * 1.1 + 9.0, 3, 909u));
+    vec2 g = worley(q2, 911u, id, fp);
+    float c2 = exp(-pow((g.y - g.x) / 0.045, 2.0)) * 0.45;
+    float broken = clamp(fbm(p / 70.0, 3, 913u) * 2.5 + 0.9, 0.0, 1.0);
+    return clamp(max(c1, c2) * broken, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    gSize = ivec2(IMG_SIZE);
+    if (px.x >= gSize.x || px.y >= gSize.y) return;
+    vec3 rgb = texelFetch(uColor, px, 0).rgb;
+
+    // Relief: a 3x3 Sobel of the surface is the smoothed gradient.
+    float gx = (surf(px + ivec2(1, -1)) + 2.0 * surf(px + ivec2(1, 0)) + surf(px + ivec2(1, 1))
+              - surf(px + ivec2(-1, -1)) - 2.0 * surf(px + ivec2(-1, 0)) - surf(px + ivec2(-1, 1))) / 8.0;
+    float gy = (surf(px + ivec2(-1, 1)) + 2.0 * surf(px + ivec2(0, 1)) + surf(px + ivec2(1, 1))
+              - surf(px + ivec2(-1, -1)) - 2.0 * surf(px + ivec2(0, -1)) - surf(px + ivec2(1, -1))) / 8.0;
+    vec3 n = normalize(vec3(-gx * ST_RELIEF_SCALE, -gy * ST_RELIEF_SCALE, 1.0));
+    vec3 L = normalize(vec3(ST_LIGHT, ST_ELEVATION));
+    float shade = clamp(max(dot(n, L), 0.0) / L.z, 0.35, 1.8);
+    vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+    float nh = max(dot(n, H), 0.0);
+    float spec = clamp(pow(nh, ST_SHININESS) - pow(H.z, ST_SHININESS), 0.0, 1.0);
+    float gloss = clamp(texelFetch(uHeight, px, 0).r * 2.0, 0.15, 1.0);
+    rgb = clamp(rgb * shade + ST_SPECULAR * spec * gloss, 0.0, 1.0);
+
+    // 0.5 means brush relief only. Artistic finishing remains independent.
+    if (ST_FINISH > 0.9) {
+    if (ST_FINAL_SAT != 1.0 || ST_FINAL_CONTRAST != 1.0) {
+        float l = luma(rgb);
+        rgb = clamp(vec3(l) + (rgb - l) * ST_FINAL_SAT, 0.0, 1.0);
+        rgb = clamp((rgb - 0.5) * ST_FINAL_CONTRAST + 0.5, 0.0, 1.0);
+    }
+    vec2 p = vec2(px) + 0.5;
+    if (ST_CRACKLE > 0.0) {
+        float c = crackNetwork(p);
+        float lift = crackNetwork(p - vec2(1.0));
+        rgb = rgb * (1.0 - 0.55 * ST_CRACKLE * c) + 0.08 * ST_CRACKLE * max(lift - c, 0.0);
+    }
+    if (ST_VARNISH > 0.0) {
+        vec3 t = ST_VARNISH_TINT;
+        rgb = rgb * (1.0 + (t - 1.0) * ST_VARNISH);
+        rgb = rgb * (1.0 - 0.06 * ST_VARNISH) + 0.025 * ST_VARNISH * t;
+    }
+    if (ST_VIGNETTE > 0.0) {
+        vec2 c = IMG_SIZE * 0.5;
+        float r = length((p - c) / c) / 1.41421;
+        rgb *= 1.0 - ST_VIGNETTE * pow(r, 2.2);
+    }
+    if (ST_GRAIN > 0.0) {
+        // static grain: seeded by the pixel, not the frame, so video does not crawl
+        float g = (hash01(uint(px.x) * 73856093u ^ uint(px.y) * 19349663u) +
+                   hash01(uint(px.x) * 83492791u ^ uint(px.y) * 2654435761u)) - 1.0;
+        rgb += ST_GRAIN * 1.7 * g;
+    }
+    }
+    imageStore(uOut, px, vec4(clamp(rgb, 0.0, 1.0), 1.0));
+}

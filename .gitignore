@@ -16,3 +16,9 @@ touchdesigner/Paintify.tox
 
 # Python bytecode / stale local TOX copies
 *.pyc
+
+# Native Mac build and TouchDesigner expansion artifacts
+build*/
+*.tox.dir/
+*.tox.toc
+*.tox.bkp*

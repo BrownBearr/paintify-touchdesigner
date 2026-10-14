@@ -1,0 +1,206 @@
+#version 460 core
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// One invocation per seed-grid cell, mirroring worker.js's `cells` loop.
+// A cell earns a stroke only when its mean Lab error exceeds the threshold --
+// which is the whole of Hertzmann's placement rule, and exactly what the first
+// version of this renderer replaced with an edge-magnitude blue-noise dither.
+
+layout(binding = 0) uniform sampler2D uRef;       // per-layer reference blur
+
+struct Cell { float meanErr; uint best; float maxDiff; float pad; };
+layout(std430, binding = 0) restrict readonly buffer CellBuf { Cell cells[]; };
+layout(std430, binding = 1) restrict buffer SeedBuf { Seed seeds[]; };
+layout(std430, binding = 3) restrict buffer CounterBuf {
+    uint seedCount; uint traceCount; uint drawnCount; uint pointCount;
+};
+
+uniform int uTemporal;
+
+// Seed compaction has to be deterministic. A single atomicAdd on a global
+// counter hands out slots in whatever order the GPU happens to schedule the
+// threads, and slot order is stroke paint order *and* decides which seeds
+// survive when the budget overflows -- so two renders of the same still came
+// out with differently stacked strokes (20% of pixels off by more than 8/255).
+// Instead: phase 0 counts the placed seeds per 8x8 tile, phase 1 turns the
+// tile counts into offsets with one workgroup, phase 2 re-derives the same
+// decisions and writes each seed at tile offset + rank in the tile. The order
+// is then a fixed function of the inputs, whatever the scheduler does. The
+// order must not follow position (worker.js shuffles its cell list so that
+// overlap order is decorrelated from position, otherwise strokes from one
+// side always lie on top): tiles are visited in a stride-permuted order and
+// seeds within a tile are ranked by a hash of their cell.
+uniform int  uPhase;      // 0 count, 1 scan, 2 write
+uniform uint uWgCount;    // phase 1: number of tiles
+uniform uint uTileStride; // phase 1: coprime to uWgCount; scatters tile order
+layout(std430, binding = 11) restrict buffer TileBuf { uint tileCount[]; };
+shared uint sFlag[64];
+shared uint sSum[64];
+shared uint sKey[64];
+
+// (a * b) mod n without 64-bit integers; every operand stays below 2^31.
+uint mulmod(uint a, uint b, uint n) {
+    uint r = 0u;
+    a %= n;
+    while (b != 0u) {
+        if ((b & 1u) != 0u) { r += a; if (r >= n) r -= n; }
+        a += a; if (a >= n) a -= n;
+        b >>= 1u;
+    }
+    return r;
+}
+
+// The placement decision for one cell: does it earn a stroke, and where does
+// the stroke start. Pure function of the cell and the uniforms.
+bool place(ivec2 cell, out uint cellIdx, out ivec2 sp, out uint layer, out uint seedHash) {
+    cellIdx = 0u; sp = ivec2(0); layer = 0u; seedHash = 0u;
+    ivec2 size = ivec2(IMG_SIZE);
+    int grid = max(1, int(GRID_SPACING));
+    ivec2 gridSize = (size + grid - 1) / grid;
+    if (cell.x >= gridSize.x || cell.y >= gridSize.y) return false;
+
+    cellIdx = uint(cell.y) * uint(gridSize.x) + uint(cell.x);
+
+    // The finest layer can ask for more strokes than the stroke buffers hold,
+    // so a layer is painted in several chunks. Assigning cells to chunks by
+    // hash rather than by index keeps each chunk scattered over the whole
+    // image -- contiguous chunks would paint in bands and show their seams,
+    // since worker.js shuffles the cell list before walking it.
+    uint nChunks = uint(max(CHUNK_COUNT, 1.0));
+    if (nChunks > 1u && (hashU(cellIdx * 2654435761u) % nChunks) != uint(CHUNK)) return false;
+
+    layer = uint(CUR_LAYER);
+    seedHash = hashU(cellIdx ^ (layer + 1u) * 83492791u
+                          ^ frameSalt() * 374761393u);
+
+    Cell c = cells[cellIdx];
+
+    // worker.js: `if (meanErr <= effectiveThreshold && !isFirstLayer) continue`
+    // -- the coarsest layer always paints, so the canvas starts covered.
+    if (c.meanErr <= THRESHOLD && FIRST_LAYER < 0.5) return false;
+
+    sp = ivec2(int(c.best & 0xffffu), int(c.best >> 16));
+    sp = clamp(sp, ivec2(0), size - 1);
+
+    // Temporal coherence: a cell whose source barely moved keeps last frame's
+    // paint. This is worker.js's frameDiffThreshold rule.
+    if (uTemporal != 0 && c.maxDiff < FRAME_DIFF) {
+        // brushkit: a slow, hash-scattered refresh of unchanged cells, so paint
+        // carried along the flow is renewed before resampling can soften it.
+        // Strokes are position-seeded, so a refreshed cell repaints the same
+        // mark rather than a new one -- it renews without flickering.
+        bool refresh = styleOn() && ST_REFRESH > 0.0 &&
+            hash01(cellIdx * 2654435761u ^ uint(FRAME) * 0x9e3779b9u ^ (layer + 7u) * 0x85ebca6bu) < ST_REFRESH;
+        if (!refresh) return false;
+    }
+
+    // brushkit value gate: ink styles leave the light half of the motif as
+    // bare paper, so no stroke is placed there at all -- not even on the
+    // coarsest layer, which otherwise always paints.
+    if (styleOn()) {
+        float l = luma(texelFetch(uRef, sp, 0).rgb);
+        if (ST_VALUE_GATE < 1.0 && l > ST_VALUE_GATE) return false;
+        // A layer can be reserved for the lights (Turner's lead white,
+        // Rembrandt's loaded highlights, Vermeer's pointille).
+        if (l < layerA().w) return false;
+    }
+
+    return true;
+}
+
+void main() {
+    if (uPhase == 1) {
+        uint t = gl_LocalInvocationIndex;
+        uint seg = (uWgCount + 63u) / 64u;
+        uint lo = min(t * seg, uWgCount), hi = min(lo + seg, uWgCount);
+        uint sum = 0u;
+        uint j = mulmod(lo, uTileStride, max(uWgCount, 1u));
+        for (uint i = lo; i < hi; ++i) {
+            sum += tileCount[j];
+            j += uTileStride; if (j >= uWgCount) j -= uWgCount;
+        }
+        sSum[t] = sum;
+        barrier();
+        uint run = 0u;
+        for (uint k = 0u; k < t; ++k) run += sSum[k];
+        j = mulmod(lo, uTileStride, max(uWgCount, 1u));
+        for (uint i = lo; i < hi; ++i) {
+            uint v = tileCount[j]; tileCount[j] = run; run += v;
+            j += uTileStride; if (j >= uWgCount) j -= uWgCount;
+        }
+        // the last thread's running total is the grand total
+        if (t == 63u) seedCount = run;
+        return;
+    }
+
+    ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(IMG_SIZE);
+    uint cellIdx, layer, seedHash;
+    ivec2 sp;
+    bool ok = place(cell, cellIdx, sp, layer, seedHash);
+
+    uint lid = gl_LocalInvocationIndex;
+    uint tile = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    sFlag[lid] = ok ? 1u : 0u;
+    sKey[lid] = hashU(cellIdx ^ 0x7f4a7c15u);
+    barrier();
+    if (uPhase == 0) {
+        if (lid == 0u) {
+            uint n = 0u;
+            for (uint k = 0u; k < 64u; ++k) n += sFlag[k];
+            tileCount[tile] = n;
+        }
+        return;
+    }
+    if (!ok) return;
+    uint rank = 0u;
+    const uint myKey = sKey[lid];
+    for (uint k = 0u; k < 64u; ++k)
+        if (sFlag[k] != 0u && (sKey[k] < myKey || (sKey[k] == myKey && k < lid))) ++rank;
+
+    uint budget = min(uint(SEED_BUDGET), uint(seeds.length()));
+    uint idx = tileCount[tile] + rank;
+    if (idx >= budget) return;   // counter may overshoot; readers clamp
+
+    // Per-stroke size and opacity variation. Web rounds the radius to an
+    // integer because its rasteriser walks integer pixel boxes; we keep it
+    // fractional, which only makes the size distribution smoother.
+    float radius = max(1.0, LAYER_RADIUS * (1.0 + (hash01(seedHash ^ 0x11u) * 2.0 - 1.0) * SIZE_JITTER));
+    float op = clamp(OPACITY * (1.0 + (hash01(seedHash ^ 0x22u) * 2.0 - 1.0) * OPACITY_JITTER), 0.0, 1.0);
+
+    // Stroke colour is the reference blur at the seed pixel -- a point sample
+    // of a properly Gaussian-blurred image, not a mip average.
+    vec3 col = clamp(texelFetch(uRef, sp, 0).rgb, 0.0, 1.0);
+    if (JITTER_HUE > 0.0 || JITTER_SAT > 0.0 || JITTER_VAL > 0.0) {
+        vec3 hsv = rgb2hsv(col);
+        hsv.x = fract(hsv.x + (hash01(seedHash ^ 0xa1u) * 2.0 - 1.0) * JITTER_HUE);
+        hsv.y = clamp(hsv.y + (hash01(seedHash ^ 0xb2u) * 2.0 - 1.0) * JITTER_SAT, 0.0, 1.0);
+        hsv.z = clamp(hsv.z + (hash01(seedHash ^ 0xc3u) * 2.0 - 1.0) * JITTER_VAL, 0.0, 1.0);
+        col = hsv2rgb(hsv);
+    }
+    // brushkit colour logic: palette, broken colour, temperature, value remaps.
+    // Seeded from the stroke's position like everything else, so it is stable
+    // from frame to frame.
+    if (styleOn()) {
+        col = styleColor(col, seedHash ^ 0x51edu, true);
+        float vm = layerB().y;     // e.g. darker tempera hatches, whiter lead white
+        col = (vm > 1.0) ? mix(col, vec3(1.0), clamp(vm - 1.0, 0.0, 1.0)) : col * vm;
+    }
+
+    // Brush tile variant, hashed from the seed position exactly as
+    // brush-texture.js `getStrokeTexture` does, so a video's strokes keep
+    // their texture from frame to frame.
+    uint variant = brushHash(sp.x, sp.y, int(layer)) & 0x7fffu;
+
+    Seed s;
+    s.pos = vec2(sp) + 0.5;
+    s.dir = vec2(0.0);          // worker.js starts with lastDx = lastDy = 0
+    s.color = packUnorm4x8(vec4(col, op));
+    s.radius = radius;
+    s.layerTex = layer | (variant << 16);
+    s.pad = 0.0;
+    seeds[idx] = s;
+}

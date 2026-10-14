@@ -1,5 +1,8 @@
 # Building the Paintify TOX
 
+For the updated Mac `Paintify-Mac.tox`, see [the Metal component build guide](macos-metal-component.md).
+This page describes the unchanged Windows build.
+
 End users only need `Paintify.tox` from the repository root (see the main README). This page is for maintainers.
 
 Paintify is a Windows TouchDesigner component with one TOP input and one TOP

@@ -2,7 +2,20 @@
 
 Turn any TouchDesigner TOP into a live, GPU-painted oil painting.
 
-## Install (one file)
+## macOS: updated Brushkit component
+
+Download [Paintify-Mac.tox](Paintify-Mac.tox), drag it into the Network Editor,
+connect a TOP, and enable **Live Paint**. This self-contained Apple Silicon
+component uses the updated Paintify-GPU Metal renderer with 23 brush families,
+independent colour/finish settings, radius sets, and shared `.sbr` look files.
+The controls use TouchDesigner's native parameter pages.
+
+Painting is GPU-accelerated; frame exchange currently uses CPU buffers, not
+zero-copy Syphon. The first frame compiles shaders. Target: macOS 13+ and
+TouchDesigner 2025. Tested development build: 2025.31550 on M1.
+See [Mac usage, limitations and builds](docs/macos-metal-component.md).
+
+## Windows: Install (one file)
 
 1. **[Download Paintify.tox](https://github.com/BrownBearr/paintify-touchdesigner/raw/main/Paintify.tox)**
 2. Drag it into a TouchDesigner Network Editor.
@@ -15,9 +28,9 @@ build, clone or install, and no other files from this repository are needed.
 **Requirements:** Windows 10/11, TouchDesigner (any recent build), and a GPU
 with OpenGL 4.6. TouchDesigner's own installer provides the VC++ runtime the
 renderer uses. TouchDesigner Non-Commercial limits images to 1280x1280.
-The TOX is Windows-only; see the [macOS port notes](docs/macos-touchdesigner-feasibility.md).
+`Paintify.tox` remains Windows-only. Mac users should use `Paintify-Mac.tox` above.
 
-## Controls
+## Windows Controls
 
 **Look** picks Impressionist, Expressionist, Pointillist, Wash or Detail. The
 main page also has painted FPS, relaxation, brush texture, impasto, temporal
