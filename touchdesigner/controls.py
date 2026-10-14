@@ -1,6 +1,6 @@
-"""Blender control metadata for the shared Brushkit material fields."""
+"""Shared Brushkit material fields for native TouchDesigner controls."""
 
-# name, label, minimum, maximum. Layout uses Blender's native controls/theme.
+# name, label, minimum, maximum. Mac inspector refinements live in mac_controls.
 GROUPS = {
     "Brush": (
         ("widthScale", "Width", .1, 4), ("capFrac", "Cap length", -1, 2),

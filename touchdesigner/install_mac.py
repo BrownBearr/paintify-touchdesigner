@@ -37,12 +37,16 @@ def install():
     comp.par.Active, comp.par.Brush, comp.par.Radiusset = True, "tempera", "balanced"
     comp.par.Radii, comp.par.Brushsize, comp.par.Fps = "8, 4, 2", 1, 12
     comp.par.Resolution, comp.par.Temporal, comp.par.Material = "100", True, True
+    comp.par.Radii.enableExpr = "me.par.Radiusset == 'custom'"
     for name, low, high in (("Brushsize", .1, 4), ("Fps", 1, 60)):
         par = getattr(comp.par, name)
         par.min, par.max, par.clampMin, par.clampMax = low, high, True, True
         par.normMin, par.normMax = low, high
 
-    stroke = comp.appendCustomPage("Stroke Settings")
+    stroke = comp.appendCustomPage("Strokes")
+    core_pages = {"Paintify": page, "Strokes": stroke,
+                  "Motion": comp.appendCustomPage("Motion"),
+                  "Classic Brush": comp.appendCustomPage("Classic Brush")}
     stroke.appendMenu("Underpaint", label="Underpaint")
     comp.par.Underpaint.menuNames = ["blur", "average", "none"]
     comp.par.Underpaint.menuLabels = ["Blur", "Average", "None"]
@@ -50,18 +54,27 @@ def install():
     stroke.appendPulse("Globallayers", label="Use global layer controls")
     for key, label, value, low, high, integer in mac_controls.CORE:
         name = mac_controls.parname(key)
-        (stroke.appendInt if integer else stroke.appendFloat)(name, label=label)
+        target = core_pages[mac_controls.core_page(key)]
+        (target.appendToggle if key == "jitter-per-frame" else
+         target.appendInt if integer else target.appendFloat)(name, label=label)
         par = getattr(comp.par, name)
         par.val, par.normMin, par.normMax = value, low, high
-        par.min, par.max, par.clampMin, par.clampMax = low, high, True, True
+        par.min, par.max = low, high
+        if key.startswith("flow-") or key in {"temporal-diff", "fresh-paint", "jitter-per-frame"}:
+            par.enableExpr = "me.par.Temporal"
+        if mac_controls.core_page(key) == "Classic Brush":
+            par.enableExpr = "me.par.Brush == 'none'"
 
     pages = {name: comp.appendCustomPage(name) for name in controls.GROUPS}
     for group, fields in controls.GROUPS.items():
         for field, label, low, high in fields:
             name = mac_controls.parname(field, "Bk")
-            pages[group].appendFloat(name, label=label)
+            target = page if field in mac_controls.QUICK_FIELDS else pages[group]
+            target.appendFloat(name, label=label)
             par = getattr(comp.par, name)
+            low, high = mac_controls.SLIDER_RANGES.get(field, (low, high))
             par.normMin, par.normMax = low, high
+            par.min, par.max = low, high
     enum_pages = {"tip": "Brush", "fieldMode": "Direction", "fallbackMode": "Direction",
                   "support": "Ground", "groundMode": "Ground"}
     for field, (label, choices) in controls.ENUMS.items():
@@ -69,12 +82,18 @@ def install():
         pages[enum_pages[field]].appendMenu(name, label=label)
         par = getattr(comp.par, name)
         par.menuNames, par.menuLabels = [str(i) for i in range(len(choices))], list(choices)
-    for group, field, label in (("Finish", "finish", "Finish enabled"),
-                                ("Ground", "strokesOff", "Flat ground only"),
+    pages["Finish"].appendMenu("Bkfinish", label="Finish")
+    comp.par.Bkfinish.menuNames = ["0", "0.5", "1"]
+    comp.par.Bkfinish.menuLabels = ["Off", "Brush relief only", "Full finish"]
+    for group, field, label in (("Ground", "strokesOff", "Flat ground only"),
                                 ("Direction", "autoVortex", "Track vortex")):
         pages[group].appendToggle(mac_controls.parname(field, "Bk"), label=label)
     pages["Effects"].appendFloat("Bktemporalrefresh", label="Paint renewal")
+    comp.par.Bktemporalrefresh.normMin, comp.par.Bktemporalrefresh.normMax = 0, 1
     pages["Colour"].appendInt("Bkpalettecount", label="Palette colours")
+    count = comp.par.Bkpalettecount
+    count.min, count.max, count.normMin, count.normMax = 0, 32, 0, 32
+    count.clampMin, count.clampMax = True, True
     for group, name in (("Ground", "Groundcolour"), ("Finish", "Varnishcolour"),
                         ("Effects", "Contourcolour")):
         pages[group].appendRGB(name, label=name.replace("colour", " colour"))
@@ -124,6 +143,9 @@ def install():
         if path.is_file():
             comp.vfs.addFile(str(path), overrideName="runtime/PaintifyMetal.app/" + path.relative_to(bundle).as_posix())
     comp.op("mac_runtime").module.apply_block(comp, mac_controls.select_brush(data, "tempera", data["defaults"]))
+    for par in comp.customPars:
+        if par.style != "Pulse" and not par.readOnly:
+            par.default = par.eval()
     comp.store("updating", False)
     comp.save(str(ROOT / "Paintify-Mac.tox"))
     print("PAINTIFY_MAC_TOX_SAVED", flush=True)

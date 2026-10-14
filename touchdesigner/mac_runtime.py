@@ -88,7 +88,7 @@ def apply_block(comp, values):
     for field, value in zip(data["fields"], values):
         par = getattr(comp.par, controls.parname(field, "Bk"), None)
         if par is not None:
-            par.val = value
+            par.val = format(value, ".9g") if field == "finish" else value
     comp.par.Material = values[0] > .5
     for prefix, names in (("Groundcolour", ("groundR", "groundG", "groundB")),
                           ("Varnishcolour", ("varnishR", "varnishG", "varnishB")),
@@ -103,6 +103,10 @@ def apply_block(comp, values):
 def change(comp, par):
     if comp.fetch("updating", False):
         return
+    if par.name in {"Minlength", "Maxlength"}:
+        if comp.par.Minlength.eval() > comp.par.Maxlength.eval():
+            other = comp.par.Maxlength if par.name == "Minlength" else comp.par.Minlength
+            other.val = par.eval()
     if par.name == "Brush":
         comp.store("updating", True)
         try:

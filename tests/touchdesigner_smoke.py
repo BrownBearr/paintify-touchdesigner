@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 import time
+import runpy
 import numpy as np
 from td import op
 
@@ -35,11 +36,60 @@ def pixels():
     return result.copy()
 
 try:
+    data, controls = runtime.metadata(comp)
+    assert comp.par.Brush.default == "tempera"
+    assert abs(comp.par.Opacity.default - .9) < 1e-5
+    assert abs(comp.par.Brushsize.default - 1) < 1e-5
+    groups = runpy.run_path(str(Path(__file__).resolve().parents[1] / "touchdesigner/controls.py"))["GROUPS"]
+    # Exercise every slider's actual TD parameter and serialized worker value.
+    comp.store("updating", True)
+    for group, fields in groups.items():
+        for field, label, low, high in fields:
+            par = getattr(comp.par, controls.parname(field, "Bk"))
+            low, high = controls.SLIDER_RANGES.get(field, (low, high))
+            assert abs(par.normMin - low) < 1e-5 and abs(par.normMax - high) < 1e-5, field
+            original = par.eval()
+            for value in (low, (low + high) / 2, high):
+                par.val = value
+                actual = controls.parse(runtime.settings_text(comp), data)["block"][data["fields"].index(field)]
+                assert abs(actual - value) < 1e-4, (field, value, actual)
+            par.val = original
+    for key, label, default, low, high, integer in controls.CORE:
+        par = getattr(comp.par, controls.parname(key))
+        original = par.eval()
+        for value in (low, high):
+            par.val = value
+            actual = controls.parse(runtime.settings_text(comp), data)["core"][key]
+            assert abs(actual - value) < 1e-4, (key, value, actual)
+        par.val = original
+    for value in ("0", "0.5", "1"):
+        comp.par.Bkfinish = value
+        assert runtime.block(comp)[data["fields"].index("finish")] == float(value)
+    restored = controls.select_brush(data, "tempera", data["defaults"])
+    restored[data["fields"].index("finish")] = .5
+    runtime.apply_block(comp, restored)
+    assert comp.par.Bkfinish.eval() == "0.5", "Brush relief state lost"
+    comp.par.Bkpalettecount = 99
+    assert comp.par.Bkpalettecount.eval() == 32, "Palette count must clamp to 32"
+    comp.par.Bkpalettecount = 0
+    assert comp.par.Bksaturation.page.name == "Paintify"
+    comp.store("updating", False)
+    comp.par.Minlength = 20
+    runtime.change(comp, comp.par.Minlength)
+    assert comp.par.Maxlength.eval() >= comp.par.Minlength.eval()
+    comp.par.Minlength, comp.par.Maxlength = 4, 16
     painted = pixels()
     assert comp.par.Status.eval() == "Painting", comp.par.Status.eval()
     raw = source.numpyArray(delayed=False)
     assert float(np.abs(painted - raw).mean()) > .005
     assert painted[-8:,:,1].mean() > painted[:8,:,1].mean(), "Vertical orientation reversed"
+    for name, value in (("Brushsize", 2), ("Anglejitter", 35), ("Opacity", .25)):
+        par = getattr(comp.par, name)
+        original = par.eval()
+        par.val = value
+        assert float(np.abs(pixels() - painted).mean()) > .001, name + " did not change rendered pixels"
+        par.val = original
+        painted = pixels()
     comp.par.Bksaturation = .2
     changed = pixels()
     assert float(np.abs(changed - painted).mean()) > .001

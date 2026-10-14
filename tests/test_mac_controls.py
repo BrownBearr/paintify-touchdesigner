@@ -11,6 +11,15 @@ DATA = json.loads((ROOT / "touchdesigner/brushkit_data.json").read_text())
 
 
 class ControlTests(unittest.TestCase):
+    def test_slider_units_and_pages(self):
+        core = {row[0]: row for row in controls.CORE}
+        self.assertEqual(core["angle-jitter"][3:5], (0, 45))
+        self.assertEqual(core["bristle-density"][3:5], (2, 30))
+        self.assertEqual(controls.SLIDER_RANGES["widthScale"], (.3, 2.5))
+        self.assertEqual(controls.core_page("threshold"), "Paintify")
+        self.assertEqual(controls.core_page("flow-levels"), "Motion")
+        self.assertEqual(controls.core_page("brush-texture"), "Classic Brush")
+
     def test_all_brushes_preserve_independent_settings(self):
         block = list(DATA["defaults"])
         block[DATA["fields"].index("saturation")] = .42

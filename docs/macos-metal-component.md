@@ -18,6 +18,28 @@ inputs are cached until pixels or settings change. Colour palettes have up to
 block, palette and imported per-layer overrides. **Use global layer controls**
 clears those overrides when global controls should take over.
 
+## Controls
+
+The first **Paintify** page contains the everyday controls: brush family and
+size, width, bristles, paint load and thickness, detail, spacing, curvature,
+opacity, saturation, and warm/cool. **Strokes**, **Motion**, and **Classic Brush**
+hold the specialized path, temporal, and legacy tile settings. The remaining
+material pages retain the full direction, colour, ground, finish, and effects.
+Custom radii are enabled only for the Custom radius set; temporal controls are
+enabled only with Temporal painting; classic controls require the classic brush.
+
+Sliders use the same units and inspector ranges as Paintify (including angle
+variation in degrees, 0-45, and classic bristle density, 2-30). Material slider
+ranges are soft: imported looks and numeric entry can retain extended values.
+Minimum and maximum stroke lengths remain ordered when edited. Palette count
+is restricted to 0-32. **Finish** distinguishes Off, Brush relief only, and
+Full finish, preserving the intermediate 0.5 state from Paintify looks.
+The default single painting pass is a live-performance choice, not the desktop
+renderer default; increase Painting passes on Strokes for more refinement.
+
+Imported per-layer overrides still take precedence over global stroke controls.
+Use **Use global layer controls** to clear them before tuning global sliders.
+
 ## Runtime
 
 This implementation paints on Metal but downloads and uploads frames at the
