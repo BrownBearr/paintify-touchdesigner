@@ -1,6 +1,6 @@
 # macOS TouchDesigner feasibility
 
-Status: researched, not implemented or tested on macOS. The current `Paintify.tox` is a Windows package.
+Status: implemented -- see [macos.md](macos.md) for the port as built (`Paintify-macOS.tox`). This page is the original pre-port research. One divergence from the plan below: rather than hand-porting the shaders to Metal, they are translated mechanically from the same GLSL sources via SPIR-V.
 
 ## Conclusion
 

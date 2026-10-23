@@ -15,7 +15,10 @@ build, clone or install, and no other files from this repository are needed.
 **Requirements:** Windows 10/11, TouchDesigner (any recent build), and a GPU
 with OpenGL 4.6. TouchDesigner's own installer provides the VC++ runtime the
 renderer uses. TouchDesigner Non-Commercial limits images to 1280x1280.
-The TOX is Windows-only; see the [macOS port notes](docs/macos-touchdesigner-feasibility.md).
+
+**On a Mac** use **[Paintify-macOS.tox](Paintify-macOS.tox)** instead (Apple
+Silicon, macOS 13+): same controls, Metal renderer, Syphon in place of Spout.
+It unpacks to `~/Library/Caches/Paintify`. See [docs/macos.md](docs/macos.md).
 
 ## Controls
 
@@ -45,3 +48,4 @@ The rest of the repository is only needed to modify or rebuild Paintify.
 - [Building the TOX](docs/building-the-tox.md)
 - [Standalone renderer (CLI and GUI), pipeline and measurements](docs/standalone-renderer.md)
 - [Architecture](docs/architecture.md)
+- [macOS port](docs/macos.md)

@@ -26,6 +26,8 @@ renderer and Syphon integration; this Windows TOX does not run on macOS. See the
 
 ## For maintainers: build the TOX
 
+For the macOS TOX (`Paintify-macOS.tox`), see [macos.md](macos.md#building-the-mac-tox).
+
 1. Build the independent renderer with `tools\build-package.bat`. This uses
    MSVC Build Tools, CMake, Ninja, and vcpkg. The package build is separate
    from `build-live`, so a running development instance is unaffected.

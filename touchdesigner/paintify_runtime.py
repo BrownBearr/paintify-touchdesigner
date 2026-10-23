@@ -4,7 +4,11 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+
+MAC = sys.platform == 'darwin'
+EXE_NAME = 'gpu-sbr' if MAC else 'gpu-sbr.exe'
 
 
 def _registry():
@@ -24,10 +28,43 @@ def names(comp):
     return ('Paintify_' + base + '_input', 'Paintify_' + base + '_output')
 
 
+def receive_name(comp):
+    # TouchDesigner's Syphon In lists other applications' servers as
+    # "appname:servername"; the renderer's process name is gpu-sbr.
+    name = names(comp)[1]
+    return 'gpu-sbr:' + name if MAC else name
+
+
 def _runtime_files(comp):
     return sorted(
         (item for item in comp.vfs.find() if item.name.startswith('runtime/')),
         key=lambda item: item.name)
+
+
+def _cache_base():
+    if MAC:
+        return Path.home() / 'Library' / 'Caches'
+    return Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir())
+
+
+def _finish_mac_runtime(runtime_dir):
+    # A TOX's VFS holds plain files only, so the framework's version symlinks
+    # are recreated here; dyld loads Syphon through Versions/A either way, but
+    # NSBundle needs the standard layout to find Syphon's own Metal shaders.
+    framework = runtime_dir / 'Frameworks' / 'Syphon.framework'
+    links = {framework / 'Versions' / 'Current': 'A',
+             framework / 'Syphon': 'Versions/Current/Syphon',
+             framework / 'Resources': 'Versions/Current/Resources'}
+    for link, target in links.items():
+        if not link.is_symlink():
+            if link.exists():
+                link.unlink()
+            link.symlink_to(target)
+    (runtime_dir / EXE_NAME).chmod(0o755)
+    # Files TouchDesigner writes may inherit the downloaded TOX's quarantine
+    # flag, which would stop the renderer from launching.
+    subprocess.run(['xattr', '-dr', 'com.apple.quarantine', str(runtime_dir)],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def prepare_runtime(comp):
@@ -45,8 +82,7 @@ def prepare_runtime(comp):
     for item in files:
         digest.update(item.name.encode('utf-8'))
         digest.update(item.byteArray)
-    cache_base = Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir())
-    runtime_dir = cache_base / 'Paintify' / digest.hexdigest()[:20]
+    runtime_dir = _cache_base() / 'Paintify' / digest.hexdigest()[:20]
     for item in files:
         relative = Path(item.name).relative_to('runtime')
         destination = runtime_dir / relative
@@ -57,7 +93,9 @@ def prepare_runtime(comp):
         temporary = destination.with_name(destination.name + '.tmp')
         temporary.write_bytes(contents)
         os.replace(temporary, destination)
-    exe = runtime_dir / 'gpu-sbr.exe'
+    if MAC:
+        _finish_mac_runtime(runtime_dir)
+    exe = runtime_dir / EXE_NAME
     if not exe.is_file():
         raise FileNotFoundError('Bundled Paintify renderer is missing')
     return exe, runtime_dir / 'shaders'
@@ -183,7 +221,7 @@ def start(comp):
         return
     exe, shader_dir = prepare_runtime(comp)
     control_dir = (exe.parent if shader_dir is not None else
-                   Path(os.environ.get('LOCALAPPDATA') or tempfile.gettempdir()) / 'Paintify')
+                   _cache_base() / 'Paintify')
     control_dir.mkdir(parents=True, exist_ok=True)
     stopfile = control_dir / ('paintify-stop-' + str(comp.id) + '.flag')
     settingsfile = control_dir / ('paintify-settings-' + str(comp.id) + '.txt')
