@@ -16,3 +16,6 @@ touchdesigner/Paintify.tox
 
 # Python bytecode / stale local TOX copies
 *.pyc
+
+# Cloned by mac/build.sh at a pinned revision
+mac/third_party/Syphon-Framework/

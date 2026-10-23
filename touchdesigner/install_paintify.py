@@ -4,12 +4,20 @@ Textport: import runpy; runpy.run_path(r'PATH_TO_THIS_FILE')
 """
 
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BUILD = ROOT / ('build-package' if (ROOT / 'build-package' / 'gpu-sbr.exe').is_file() else 'build-live')
-EXE = BUILD / 'gpu-sbr.exe'
-TOX = ROOT / 'Paintify.tox'
+MAC = sys.platform == 'darwin'
+if MAC:
+    # mac/build.sh lays the runtime out exactly as it is extracted.
+    BUILD = ROOT / 'mac' / 'build' / 'runtime'
+    EXE = BUILD / 'gpu-sbr'
+    TOX = ROOT / 'Paintify-macOS.tox'
+else:
+    BUILD = ROOT / ('build-package' if (ROOT / 'build-package' / 'gpu-sbr.exe').is_file() else 'build-live')
+    EXE = BUILD / 'gpu-sbr.exe'
+    TOX = ROOT / 'Paintify.tox'
 
 if not EXE.is_file():
     raise FileNotFoundError(f'Build the Paintify GPU renderer first: {EXE}')
@@ -45,13 +53,36 @@ def onDestroy(*args):
 '''
 
 
-def install():
+def _runtime_files():
+    """(source path, VFS name) for everything the renderer needs at runtime."""
+    if MAC:
+        framework = BUILD / 'Frameworks' / 'Syphon.framework' / 'Versions' / 'A'
+        files = [(EXE, 'runtime/gpu-sbr')]
+        files += [(path, 'runtime/shaders/' + path.name)
+                  for path in sorted((BUILD / 'shaders').glob('*.metal'))]
+        # Headers and the signature folder are not needed to load the
+        # framework; symlinks are recreated by paintify_runtime on extraction.
+        files.append((framework / 'Syphon',
+                      'runtime/Frameworks/Syphon.framework/Versions/A/Syphon'))
+        for path in sorted((framework / 'Resources').rglob('*')):
+            if path.is_file():
+                files.append((path, 'runtime/Frameworks/Syphon.framework/Versions/A/Resources/'
+                              + path.relative_to(framework / 'Resources').as_posix()))
+        return files
+    files = [(BUILD / name, 'runtime/' + name)
+             for name in ('gpu-sbr.exe', 'glfw3.dll', 'Spout.dll')]
+    files += [(path, 'runtime/shaders/' + path.name)
+              for path in sorted((ROOT / 'shaders').glob('*')) if path.is_file()]
+    return files
+
+
+def install(parent='/project1', save=True):
     # TD injects op() in the Textport; import it explicitly for runpy.run_path.
     from td import op
 
-    root = op('/project1')
+    root = op(parent)
     if root is None:
-        raise RuntimeError('TouchDesigner project /project1 is unavailable')
+        raise RuntimeError('TouchDesigner component ' + parent + ' is unavailable')
     previous = root.op('paintify')
     if previous is not None:
         old_runtime = previous.op('paintify_runtime')
@@ -137,11 +168,14 @@ def install():
     source.outputConnectors[0].connect(send.inputConnectors[0])
     receive.outputConnectors[0].connect(upright.inputConnectors[0])
     upright.outputConnectors[0].connect(result.inputConnectors[0])
-    upright.par.flipy = True
+    # Spout hands the painting back bottom-up; Syphon already delivers it
+    # upright, so the Mac component passes it through.
+    upright.par.flipy = not MAC
     send.par.active = True
     send.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[0]"
-    receive.par.sendername.expr = "parent().op('paintify_runtime').module.names(parent())[1]"
-    receive.par.usespoutactivesender = False
+    receive.par.sendername.expr = "parent().op('paintify_runtime').module.receive_name(parent())"
+    if hasattr(receive.par, 'usespoutactivesender'):
+        receive.par.usespoutactivesender = False
     source.nodeX, source.nodeY = 0, 0
     send.nodeX, send.nodeY = 200, 0
     receive.nodeX, receive.nodeY = 400, 0
@@ -171,18 +205,18 @@ def install():
     cleanup.par.op = '..'
     cleanup.par.destroy = True
 
-    for name in ('gpu-sbr.exe', 'glfw3.dll', 'Spout.dll'):
-        path = BUILD / name
+    for path, name in _runtime_files():
         if not path.is_file():
             raise FileNotFoundError('Build the Paintify live renderer first: ' + str(path))
-        comp.vfs.addFile(str(path), overrideName='runtime/' + name)
-    for path in sorted((ROOT / 'shaders').glob('*')):
-        if path.is_file():
-            comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
-    comp.save(str(TOX), createFolders=True)
+        comp.vfs.addFile(str(path), overrideName=name)
+    if save:
+        comp.save(str(TOX), createFolders=True)
+        print('Paintify component saved to ' + str(TOX))
     runtime.module.start(comp)
-    print('Paintify component saved to ' + str(TOX))
     return comp
 
 
-install()
+# runpy.run_path(..., init_globals={'PAINTIFY_NO_INSTALL': True}) loads the
+# module without installing, so install() can be called with arguments.
+if not globals().get('PAINTIFY_NO_INSTALL'):
+    install()
