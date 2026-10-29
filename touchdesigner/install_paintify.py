@@ -34,8 +34,15 @@ def onExit():
 PAR_EXECUTE = r'''
 def onValueChange(par, prev):
     comp = parent()
+    if comp.op('paintify_ui').module.change(comp, par):
+        return
     comp.op('paintify_runtime').module.update(comp)
     return
+
+def onPulse(par):
+    comp = parent()
+    if not comp.op('paintify_ui').module.pulse(comp, par.name):
+        comp.op('paintify_runtime').module.pulse(comp, par.name)
 '''
 
 OP_EXECUTE = r'''
@@ -160,6 +167,8 @@ def install():
 
     runtime = comp.create('textDAT', 'paintify_runtime')
     runtime.text = RUNTIME
+    ui = comp.create('textDAT', 'paintify_ui')
+    ui.text = (ROOT / 'touchdesigner/tox_ui.py').read_text(encoding='utf-8')
     lifecycle = comp.create('executeDAT', 'paintify_lifecycle')
     lifecycle.text = EXECUTE
     lifecycle.par.create = True
@@ -173,9 +182,11 @@ def install():
                          'Tensorsigma Etf Etfradius Bristledensity Texturetaper '
                          'Drybrush Lightangle Sizejitter Anglejitter Opacityjitter '
                          'Relaxarea Relaxmove Relaxcandidates Relaxremove '
-                         'Relaxsubpasses Flowiters Jitterperframe')
+                         'Relaxsubpasses Flowiters Jitterperframe Performance Restart Help')
     controls.par.valuechange = True
+    controls.par.onpulse = True
     controls.par.custom = True
+    controls.par.builtin = False
     cleanup = comp.create('opexecuteDAT', 'paintify_cleanup')
     cleanup.text = OP_EXECUTE
     cleanup.par.op = '..'
@@ -189,6 +200,7 @@ def install():
     for path in sorted((ROOT / 'shaders').glob('*')):
         if path.is_file():
             comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
+    ui.module.configure(comp)
     comp.save(str(TOX), createFolders=True)
     runtime.module.start(comp)
     print('Paintify component saved to ' + str(TOX))

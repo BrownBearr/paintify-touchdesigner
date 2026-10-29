@@ -2,7 +2,7 @@
   "platform": "Windows packaging only; native Metal runtime not executed",
   "original_unchanged": true,
   "output": "C:\\Users\\I3row\\AI-Work\\ChatGPT\\Paintify-Touchdesigner-latest-20261029\\Paintify-Mac-Optimized.tox",
-  "embedded_runtime_sha256": "c222ebb3afe5ba12feb4f6d2bfb9d433af4ea109fbaac27920d4e32e1335bfb5",
+  "embedded_runtime_sha256": "4408d47c23637bd4a50a4e446d388d8cd2bfe9b3b267162ac94886addb36109b",
   "runtime_matches_source": true,
   "resolution": "50",
   "resize_mode": "half",

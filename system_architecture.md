@@ -22,3 +22,23 @@ Optimized artifacts are separate from preserved upstream originals. Windows
 installer supports `PAINTIFY_TOX_OUTPUT` for candidate packaging. Re-embedding
 runtime DATs is necessary after Python edits; rebuilding the native executable
 is necessary after C++ edits. Do not assume changing source updates a saved TOX.
+
+## Native TOX UI and second runtime pass
+
+`touchdesigner/tox_ui.py` is embedded as the `paintify_ui` DAT in both TOXs.
+It moves parameters between native pages without renaming/removing controls,
+sets contextual help and soft slider maxima, and embeds `paintify_help`.
+UI callbacks run before renderer callbacks and consume readonly status/help
+changes. Performance presets only change their mapped fields; manual changes
+mark them Custom. Main controls open first through `currentPage` and
+`showCustomOnly`; builtin settings remain accessible via the native flag.
+Parameter Execute observes an explicit custom-parameter scope. Preset changes
+are deferred one frame outside that callback, so its own baseline sees the
+new field values and later manual edits back to original values still fire.
+Readonly/internal fields and builtin tab changes do not touch render settings.
+
+Watchers resolve stable component IDs. Windows restarts path-derived Spout
+channels on rename; Mac retains the worker. Delayed watcher guards/tokens
+prevent duplicate chains. Windows status and log paths are readonly controls.
+Mac cached frames upload only when the output Script TOP or pixel object
+changes; real TD retention was verified before applying this optimization.

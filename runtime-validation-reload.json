@@ -2,8 +2,12 @@
   "Paintify-Optimized.tox": {
     "loaded": true,
     "runtime_matches_source": true,
-    "sha256": "439393ecc4581ee7a8c311bbac5612f9bccddc42dd6dc54b250c0f196d1d441d",
-    "bytes": 593958,
+    "sha256": "ffa20728a2fc4740a03326abfbc04a38d536f42b6c64c83448c56dbd08c78da2",
+    "bytes": 601430,
+    "ui_matches_source": true,
+    "opening_page": "Paintify",
+    "custom_controls_shown_first": true,
+    "embedded_help": true,
     "reset_defaults": {
       "Fps": 12.0,
       "Relax": 0,
@@ -15,8 +19,12 @@
   "Paintify-Mac-Optimized.tox": {
     "loaded": true,
     "runtime_matches_source": true,
-    "sha256": "e18a2d013cf3c0107cbab1802e6f479b567e23a637a74ddbc69ace716de4b373",
-    "bytes": 2380600,
+    "sha256": "2cfff75d1875407152a9c40214f13e54c9a5855d8b74307961c2e16a950809ad",
+    "bytes": 2386448,
+    "ui_matches_source": true,
+    "opening_page": "Paintify",
+    "custom_controls_shown_first": true,
+    "embedded_help": true,
     "resolution_default": "50",
     "resize_mode": "half"
   }

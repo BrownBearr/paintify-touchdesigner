@@ -1,0 +1,20 @@
+{
+  "windows": {
+    "look": "impressionist",
+    "fps": 12.0,
+    "preset_callback": true,
+    "manual_callback": true,
+    "original_look_preserved": true,
+    "original_fps_preserved": true,
+    "errors": ""
+  },
+  "mac": {
+    "look": "tempera",
+    "fps": 12.0,
+    "preset_callback": true,
+    "manual_callback": true,
+    "original_look_preserved": true,
+    "original_fps_preserved": true,
+    "errors": ""
+  }
+}

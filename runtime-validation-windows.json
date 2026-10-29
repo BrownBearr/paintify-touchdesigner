@@ -22,10 +22,11 @@
         640,
         360
       ],
-      "mean": 0.478162944316864,
-      "std": 0.29436972737312317,
+      "mean": 0.4797523021697998,
+      "std": 0.2942717671394348,
       "errors": "",
-      "renderer_alive": true
+      "renderer_alive": true,
+      "status": "Running"
     },
     {
       "label": "working_limit_320",
@@ -33,10 +34,11 @@
         320,
         180
       ],
-      "mean": 0.48776090145111084,
-      "std": 0.2978782057762146,
+      "mean": 0.48379480838775635,
+      "std": 0.2946951687335968,
       "errors": "",
-      "renderer_alive": true
+      "renderer_alive": true,
+      "status": "Running"
     },
     {
       "label": "pointillist_live_update",
@@ -44,10 +46,11 @@
         320,
         180
       ],
-      "mean": 0.4588983356952667,
-      "std": 0.33138900995254517,
+      "mean": 0.4585185945034027,
+      "std": 0.33175477385520935,
       "errors": "",
-      "renderer_alive": true
+      "renderer_alive": true,
+      "status": "Running"
     },
     {
       "label": "restart",
@@ -55,13 +58,26 @@
         320,
         180
       ],
-      "mean": 0.4583020508289337,
-      "std": 0.3319264352321625,
+      "mean": 0.4592040181159973,
+      "std": 0.3313799798488617,
       "errors": "",
-      "renderer_alive": true
+      "renderer_alive": true,
+      "status": "Running"
+    },
+    {
+      "label": "renamed_component",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4591043293476105,
+      "std": 0.33110538125038147,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
     }
   ],
-  "startup_retries": 1,
   "stopped": true,
+  "rename_registry_path_matches": true,
   "final_stopped": true
 }

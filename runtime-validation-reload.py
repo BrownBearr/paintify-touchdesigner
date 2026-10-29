@@ -18,6 +18,10 @@ for filename, dat_name, source_file in (
         'runtime_matches_source': comp.op(dat_name).text == (root_path / 'touchdesigner' / source_file).read_text(encoding='utf-8'),
         'sha256': hashlib.sha256((root_path / filename).read_bytes()).hexdigest(),
         'bytes': (root_path / filename).stat().st_size,
+        'ui_matches_source': comp.op('paintify_ui').text == (root_path / 'touchdesigner/tox_ui.py').read_text(encoding='utf-8'),
+        'opening_page': comp.currentPage.name,
+        'custom_controls_shown_first': comp.showCustomOnly,
+        'embedded_help': len(comp.op('paintify_help').text) > 500,
     }
     if dat_name == 'paintify_runtime':
         result['reset_defaults'] = {name: getattr(comp.par, name).default for name in ('Fps', 'Relax', 'Passes', 'Maxdimension')}

@@ -101,6 +101,8 @@ def apply_block(comp, values):
 
 
 def change(comp, par):
+    if par.name in {"Status", "Logfile"}:
+        return
     if comp.fetch("updating", False):
         return
     entry = registry().get(comp.id)
@@ -123,17 +125,18 @@ def change(comp, par):
 
 def pulse(comp, name):
     entry = registry().get(comp.id)
-    if entry is not None:
-        entry["settings_dirty"] = True
-    data, controls = metadata(comp)
     if name == "Restart":
         stop(comp)
         return
-    path = Path(comp.par.Lookfile.eval()).expanduser()
+    data, controls = metadata(comp)
     if name == "Savelook":
+        path = Path(comp.par.Lookfile.eval()).expanduser()
         path.write_text(settings_text(comp), encoding="utf-8")
     elif name == "Loadlook":
+        path = Path(comp.par.Lookfile.eval()).expanduser()
         look = controls.parse(path.read_text(encoding="utf-8"), data)
+        if entry is not None:
+            entry["settings_dirty"] = True
         comp.store("updating", True)
         try:
             comp.par.Brush = look["brush"]
@@ -150,6 +153,8 @@ def pulse(comp, name):
         finally:
             comp.store("updating", False)
     elif name == "Globallayers":
+        if entry is not None:
+            entry["settings_dirty"] = True
         comp.store("layers", [])
 
 
@@ -177,16 +182,19 @@ def start(comp):
     log = logpath.open("wb")
     proc = subprocess.Popen([str(exe), str(settings)], stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=log, bufsize=0)
+    watch_token = time.monotonic_ns()
     entry = {"proc": proc, "temp": temp, "settings": settings, "log": log,
              "key": None, "pixels": None, "last": 0.0, "path": comp.path,
-             "settings_text": text, "settings_dirty": False}
+             "settings_text": text, "settings_dirty": False,
+             "watch_token": watch_token}
     registry()[comp.id] = entry
     comp.par.Logfile = str(logpath)
     ready = struct.unpack("<4I", read_exact(proc, 16))
     if ready != (MAGIC, 0, 0, 0):
         raise RuntimeError("Invalid Metal renderer startup response")
     from td import op, run
-    run(watch, comp.id, delayMilliSeconds=1000, delayRef=op.TDResources)
+    run(watch, comp.id, watch_token, delayMilliSeconds=1000,
+        delayRef=op.TDResources)
     return entry
 
 
@@ -215,16 +223,32 @@ def stop(comp):
     stop_id(comp.id)
 
 
-def watch(identifier):
+def copy_cached_once(script, entry):
+    script_id = getattr(script, "id", id(script))
+    pixels = entry["pixels"]
+    if (entry.get("output_script_id") == script_id
+            and entry.get("output_pixels") is pixels):
+        return
+    script.copyNumpyArray(pixels)
+    entry["output_script_id"] = script_id
+    entry["output_pixels"] = pixels
+
+
+def watch(identifier, token=None):
     from td import op, run
     entry = registry().get(identifier)
     if not entry:
         return
-    comp = op(entry["path"])
-    if comp is None or comp.id != identifier:
+    current_token = entry.get("watch_token")
+    if current_token is not None and token != current_token:
+        return
+    comp = op(identifier)
+    if comp is None:
         stop_id(identifier)
         return
-    run(watch, identifier, delayMilliSeconds=1000, delayRef=op.TDResources)
+    entry["path"] = comp.path
+    run(watch, identifier, current_token, delayMilliSeconds=1000,
+        delayRef=op.TDResources)
 
 
 def cook(script):
@@ -252,7 +276,7 @@ def cook(script):
         now = time.monotonic()
         if entry is not None and entry["pixels"] is not None:
             if now - entry["last"] < 1 / max(1.0, float(comp.par.Fps.eval())):
-                script.copyNumpyArray(entry["pixels"])
+                copy_cached_once(script, entry)
                 return
         pixels = source.numpyArray(delayed=False)
         if pixels is None:
@@ -275,7 +299,7 @@ def cook(script):
         if entry["pixels"] is not None and entry["key"] == key and not animated:
             entry["last"] = now
             entry["settings_dirty"] = False
-            script.copyNumpyArray(entry["pixels"])
+            copy_cached_once(script, entry)
             return
         if text != entry.get("settings_text"):
             entry["settings"].write_text(text)
@@ -294,7 +318,7 @@ def cook(script):
         painted = np.frombuffer(read_exact(entry["proc"], w * h * 4), dtype=np.uint8).reshape(h, w, 4)
         entry["pixels"] = np.ascontiguousarray(painted[::-1].astype(np.float32) / 255)
         entry["key"], entry["last"] = key, now
-        script.copyNumpyArray(entry["pixels"])
+        copy_cached_once(script, entry)
         comp.par.Status = "Painting"
     except Exception as error:
         comp.par.Status = str(error)

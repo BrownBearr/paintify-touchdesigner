@@ -13,6 +13,11 @@ throttled cooks. Full resolution and quality controls remain available.
 See [Mac controls and runtime](docs/macos-metal-component.md) and the local
 validation report for verification limits.
 
+The native **Paintify** page now contains the everyday controls, performance
+presets, live status and a built-in quick-start guide. Advanced controls are
+grouped by task; every original parameter remains available. See the
+[TOX control guide](docs/tox-controls.md).
+
 ## Original upstream install (one file)
 
 1. **[Download Paintify.tox](https://github.com/BrownBearr/paintify-touchdesigner/raw/main/Paintify.tox)**

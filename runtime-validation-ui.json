@@ -1,0 +1,102 @@
+{
+  "windows": {
+    "all_original_controls_preserved": true,
+    "original_control_count": 36,
+    "values_preserved_during_upgrade": true,
+    "pages": [
+      "Paintify",
+      "Performance",
+      "Strokes",
+      "Surface",
+      "Motion",
+      "Refinement",
+      "Setup"
+    ],
+    "main_parameters": [
+      "Guide",
+      "Active",
+      "Status",
+      "Preset",
+      "Performance",
+      "Fps",
+      "Brushtexture",
+      "Impasto",
+      "Impastolight",
+      "Help"
+    ],
+    "presets": {
+      "preview": {
+        "Maxdimension": 640,
+        "Passes": 4,
+        "Relax": 0
+      },
+      "balanced": {
+        "Maxdimension": 1280,
+        "Passes": 4,
+        "Relax": 0
+      },
+      "quality": {
+        "Maxdimension": 0,
+        "Passes": 8,
+        "Relax": 4
+      }
+    },
+    "manual_switches_to_custom": true,
+    "fps_and_look_preserved": true,
+    "fps_tooltip": "Number of new paintings per second. Lowering this saves work while TouchDesigner can still run at its own project frame rate.",
+    "errors": ""
+  },
+  "mac": {
+    "all_original_controls_preserved": true,
+    "original_control_count": 274,
+    "values_preserved_during_upgrade": true,
+    "pages": [
+      "Paintify",
+      "Performance",
+      "Strokes",
+      "Brush",
+      "Direction",
+      "Colour",
+      "Ground",
+      "Finish",
+      "Motion",
+      "Refinement",
+      "Classic Brush",
+      "Effects",
+      "Palette",
+      "Look Files",
+      "Setup"
+    ],
+    "main_parameters": [
+      "Guide",
+      "Active",
+      "Status",
+      "Brush",
+      "Brushsize",
+      "Radiusset",
+      "Radii",
+      "Performance",
+      "Fps",
+      "Threshold",
+      "Opacity",
+      "Material",
+      "Temporal",
+      "Help"
+    ],
+    "presets": {
+      "preview": {
+        "Resolution": "25"
+      },
+      "balanced": {
+        "Resolution": "50"
+      },
+      "quality": {
+        "Resolution": "100"
+      }
+    },
+    "manual_switches_to_custom": true,
+    "fps_and_look_preserved": true,
+    "fps_tooltip": "Number of new paintings per second. Lowering this saves work while TouchDesigner can still run at its own project frame rate.",
+    "errors": ""
+  }
+}

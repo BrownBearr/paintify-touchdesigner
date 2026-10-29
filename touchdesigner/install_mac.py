@@ -113,7 +113,7 @@ def install():
     for name in ("Status", "Logfile"):
         getattr(comp.par, name).readOnly = True
 
-    for name, filename in (("mac_runtime", "mac_runtime.py"), ("mac_controls", "mac_controls.py"),
+    for name, filename in (("mac_runtime", "mac_runtime.py"), ("mac_controls", "mac_controls.py"), ('paintify_ui', 'tox_ui.py'),
                            ("brushkit_data", "brushkit_data.json")):
         dat = comp.create("textDAT", name)
         dat.text = (ROOT / "touchdesigner" / filename).read_text()
@@ -137,9 +137,12 @@ def install():
     par_callbacks = comp.create("parameterexecuteDAT", "controls_changed")
     par_callbacks.par.op, par_callbacks.par.pars = "..", "*"
     par_callbacks.par.valuechange, par_callbacks.par.onpulse = True, True
+    par_callbacks.par.custom, par_callbacks.par.builtin = True, False
     par_callbacks.text = ("def onValueChange(par, prev):\n"
+                          "    if parent().op('paintify_ui').module.change(parent(), par):\n        return\n"
                           "    parent().op('mac_runtime').module.change(parent(), par)\n"
                           "def onPulse(par):\n"
+                          "    if parent().op('paintify_ui').module.pulse(parent(), par.name):\n        return\n"
                           "    parent().op('mac_runtime').module.pulse(parent(), par.name)\n")
     lifecycle = comp.create("executeDAT", "lifecycle")
     lifecycle.par.exit = True
@@ -152,6 +155,7 @@ def install():
     for par in comp.customPars:
         if par.style != "Pulse" and not par.readOnly:
             par.default = par.eval()
+    comp.op('paintify_ui').module.configure(comp)
     comp.store("updating", False)
     comp.save(str(ROOT / "Paintify-Mac.tox"))
     print("PAINTIFY_MAC_TOX_SAVED", flush=True)

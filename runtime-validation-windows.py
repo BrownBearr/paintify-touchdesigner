@@ -53,6 +53,7 @@ def capture(label):
         'std': float(pixels[:, :, :3].std()) if pixels is not None else None,
         'errors': comp.errors(recurse=True),
         'renderer_alive': entry is not None and entry[0].poll() is None,
+        'status': comp.par.Status.eval(),
     })
     (root_path / 'runtime-validation-windows.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
 
@@ -85,6 +86,12 @@ def stopped():
 
 def restarted():
     capture('restart')
+    comp.name = 'paintify_validation_renamed_' + str(comp.id)
+    run(renamed, delayMilliSeconds=4000, delayRef=op.TDResources)
+
+def renamed():
+    capture('renamed_component')
+    record['rename_registry_path_matches'] = comp.op('paintify_runtime').module._registry()[comp.id][5] == comp.path
     comp.op('paintify_runtime').module.stop(comp)
     comp.par.Active = False
     record['final_stopped'] = comp.id not in comp.op('paintify_runtime').module._registry()
