@@ -268,6 +268,13 @@ because contiguous subsets would each cover a band and show their seams —
 `worker.js` shuffles its cell list to decorrelate overlap order from position
 for the same reason.
 
+The TouchDesigner component uses four passes for its interactive default: on
+the measured comparison image, four passes took 1.74 ms with 6.82 mean points
+per stroke, while eight took 2.38 ms with 6.96 points. The component defaults
+to no relaxation because every relaxation iteration repaints the full canvas;
+set `Passes = 8` and `Relax = 4` when fidelity is more important than live
+throughput.
+
 The count is also floored by capacity: 2880x3840 at radius 2 is 2.76M cells
 against a 200K stroke buffer. Either way each cell is evaluated exactly once and
 the error map is still built once per layer, so passes never change *which*

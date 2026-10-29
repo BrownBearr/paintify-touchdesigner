@@ -1,0 +1,243 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// brushkit effects.py / media.py as per-pixel GPU passes. All of them read the
+// painting and write the *output* image; none touches the canvas, which is the
+// temporal state carried between video frames.
+//   pass 0: smear  -- line-integral convolution of the paint along the style
+//                     field (Turner's smoke, Munch's wavering sky)
+//   pass 1: wash   -- transparent watercolour: Beer-Lambert over the paper,
+//                     edge darkening, granulation, pooling
+//   pass 2: overlay-- contour drawing, keylines, Ben-Day dots, pool caustics,
+//                     bokashi and rain, in place on the output
+
+layout(binding = 0) uniform sampler2D uColor;   // pass 0: canvas
+layout(binding = 1) uniform sampler2D uGrad;    // pass 0: direction field
+layout(binding = 2) uniform sampler2D uFlatS;   // flat colour (rgb) + region label (a)
+layout(binding = 3) uniform sampler2D uToothS;  // support tooth
+layout(binding = 4) uniform sampler2D uSrc;     // the source, mipped
+layout(rgba16f, binding = 0) uniform image2D uOut;
+
+uniform int uPass;
+uniform int uFlatValid;   // uFlatS holds this frame's flat image
+
+const float PI = 3.14159265;
+
+vec2 fieldDir(vec2 p) {
+    vec3 g = texture(uGrad, p / IMG_SIZE).rgb;
+    vec2 t = vec2(-g.y, g.x);
+    float l = length(t);
+    return l > 1e-8 ? t / l : vec2(1.0, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+void smearPass(ivec2 px) {
+    vec2 p0 = vec2(px) + 0.5;
+    vec3 base = texelFetch(uColor, px, 0).rgb;
+    int n = clamp(int(ST_LIC_LEN / 3.0), 1, 24);
+    vec3 acc = base;
+    float wsum = 1.0;
+    for (int sgn = -1; sgn <= 1; sgn += 2) {
+        vec2 p = p0;
+        vec2 prev = fieldDir(p0) * float(sgn);
+        for (int i = 0; i < n; ++i) {
+            vec2 d = fieldDir(p);
+            if (dot(d, prev) < 0.0) d = -d;
+            p += 1.5 * d;
+            prev = d;
+            float w = exp(-2.0 * pow(float(i) / float(n), 2.0));
+            acc += w * texture(uColor, p / IMG_SIZE).rgb;
+            wsum += w;
+        }
+    }
+    imageStore(uOut, px, vec4(mix(base, acc / wsum, clamp(ST_LIC, 0.0, 1.0)), 1.0));
+}
+
+// ---------------------------------------------------------------------------
+void washPass(ivec2 px) {
+    vec2 p = vec2(px) + 0.5;
+    vec3 paper = ST_GROUND;
+    // the wet area never follows the drawing exactly
+    vec2 wob = 4.0 * vec2(fbm(p / 45.0, 3, 1701u), fbm(p / 45.0 + 9.1, 3, 1703u));
+    vec2 uv = (p + wob) / IMG_SIZE;
+    vec3 F = texture(uFlatS, uv).rgb;
+    vec3 ring = vec3(0.0);
+    for (int k = 0; k < 8; ++k) {
+        float a = float(k) * PI / 4.0;
+        ring += texture(uFlatS, uv + 3.0 * vec2(cos(a), sin(a)) / IMG_SIZE).rgb;
+    }
+    ring /= 8.0;
+    vec3 T = clamp(F / max(paper, vec3(0.05)), 0.02, 1.0);
+    // pigment migrates to the drying rim: darker just inside the darker wash
+    float rim = clamp(length(F - ring) * 5.0, 0.0, 1.0) * ((luma(F) < luma(ring) + 0.02) ? 1.0 : 0.35);
+    float d = 1.0 + ST_EDGE_DARKEN * rim * 1.6;
+    float tooth = texelFetch(uToothS, px, 0).r;
+    d *= clamp(1.0 + ST_GRANULATION * (0.5 - tooth) * 2.0 * (1.0 + 0.5 * fbm(p / 3.0, 2, 1705u)), 0.2, 2.0);
+    d *= 1.0 + 0.25 * fbm(p / 70.0, 4, 1707u);
+    d *= smoothstep(0.975, 0.93, luma(F));            // paper left bare for the lights
+    imageStore(uOut, px, vec4(clamp(paper * pow(T, vec3(d)), 0.0, 1.0), 1.0));
+}
+
+// ---------------------------------------------------------------------------
+float srcLuma(vec2 p, float lod) { return luma(textureLod(uSrc, p / IMG_SIZE, lod).rgb); }
+
+float contourLine(vec2 p0) {
+    // painted drawing along strong edges, with hand tremor and breaks
+    vec2 p = p0 + ST_CONTOUR_WOBBLE * vec2(fbm(p0 / 18.0, 2, 1801u), fbm(p0 / 18.0 + 9.0, 2, 1803u));
+    float lod = max(0.0, log2(max(ST_CONTOUR_SIGMA, 1.0)));
+    float e = exp2(lod);
+    float gx = srcLuma(p + vec2(e, 0), lod) - srcLuma(p - vec2(e, 0), lod);
+    float gy = srcLuma(p + vec2(0, e), lod) - srcLuma(p - vec2(0, e), lod);
+    float mag = length(vec2(gx, gy)) * 2.0;
+    if (mag < ST_CONTOUR_THR * 0.7) return 0.0;
+    vec2 n = vec2(gx, gy) / max(length(vec2(gx, gy)), 1e-6);
+    float w = max(ST_CONTOUR_WIDTH * 0.6, 0.75);
+    vec2 pa = p + n * w, pb = p - n * w;
+    float ma = length(vec2(srcLuma(pa + vec2(e, 0), lod) - srcLuma(pa - vec2(e, 0), lod),
+                           srcLuma(pa + vec2(0, e), lod) - srcLuma(pa - vec2(0, e), lod))) * 2.0;
+    float mb = length(vec2(srcLuma(pb + vec2(e, 0), lod) - srcLuma(pb - vec2(e, 0), lod),
+                           srcLuma(pb + vec2(0, e), lod) - srcLuma(pb - vec2(0, e), lod))) * 2.0;
+    float ridge = smoothstep(0.9, 1.0, mag / max(max(ma, mb), 1e-5));
+    float strength = smoothstep(ST_CONTOUR_THR, ST_CONTOUR_THR * 1.5, mag);
+    float broken = smoothstep(-0.25, 0.15, fbm(p0 / 35.0, 3, 1805u));
+    return ridge * strength * broken;
+}
+
+float rainAt(vec2 p) {
+    float th = radians(ST_RAIN_ANGLE);
+    vec2 dir = vec2(cos(th), sin(th));
+    vec2 nrm = vec2(-dir.y, dir.x);
+    float along = dot(p, dir), across = dot(p, nrm);
+    float acc = 0.0;
+    for (int layer = 0; layer < 2; ++layer) {
+        float cs = (layer == 0 ? 9.0 : 5.0) / max(ST_RAIN_DENSITY, 0.05);
+        float col = floor(across / cs);
+        uint h = hashU(uint(int(col) + 100000) * 2654435761u ^ uint(layer + 1) * 0x9e37u);
+        if (hash01(h) > 0.55) continue;
+        float center = (col + 0.2 + 0.6 * hash01(h ^ 0x11u)) * cs;
+        float thick = (hash01(h ^ 0x22u) < 0.25 ? 1.1 : 0.6);
+        float prof = exp(-pow((across - center) / thick, 2.0));
+        float len = ST_RAIN_LENGTH * (0.4 + 0.9 * hash01(h ^ 0x33u));
+        float period = len * (2.0 + 2.0 * hash01(h ^ 0x44u));
+        float t = mod(along + hash01(h ^ 0x55u) * period + ST_TIME * 14.0, period) / len;
+        if (t > 1.0) continue;
+        float a = ST_RAIN_ALPHA * (0.3 + 0.7 * sqrt(hash01(h ^ 0x66u)));
+        acc += a * pow(sin(PI * t), 0.6) * prof;
+    }
+    return clamp(acc * 1.6, 0.0, 1.0);
+}
+
+void overlayPass(ivec2 px) {
+    vec2 p = vec2(px) + 0.5;
+    ivec2 size = ivec2(IMG_SIZE);
+    vec3 rgb = imageLoad(uOut, px).rgb;
+    bool flat_ = uFlatValid != 0;
+
+    if (flat_ && ST_HALFTONE > 0.0) {
+        // Ben-Day: light mid-tone regions become dot fields, dot size from darkness
+        vec4 f = texelFetch(uFlatS, px, 0);
+        vec3 hsv = rgb2hsv(f.rgb);
+        float l = luma(f.rgb);
+        if (l > 0.5 && l < 0.86 && hsv.y < 0.55) {
+            float ls = srcLuma(p, 1.0);
+            float cov = clamp(0.25 + (0.9 - ls) * 0.9, 0.12, 0.7);
+            float sp = max(ST_HALFTONE_SP, 3.0);
+            float c = cos(PI / 4.0), s = sin(PI / 4.0);
+            vec2 uv = vec2(p.x * c + p.y * s, -p.x * s + p.y * c) / sp;
+            vec2 cc = floor(uv) + 0.5;
+            float r = sqrt(cov / PI) * 1.12;
+            float dot_ = clamp((r - length(uv - cc)) * sp / 0.7 + 0.5, 0.0, 1.0);
+            vec3 dotCol = (hsv.x < 0.2 || hsv.x > 0.85) ? vec3(0.91, 0.14, 0.12) : vec3(0.12, 0.31, 0.82);
+            vec3 base = mix(rgb, vec3(0.985, 0.98, 0.965), ST_HALFTONE);
+            rgb = mix(base, dotCol, dot_ * ST_HALFTONE);
+        }
+    }
+
+    if (flat_ && ST_BOKASHI > 0.0) {
+        // print sky: a hand-wiped band of Prussian blue across the top
+        vec3 hsv = rgb2hsv(texelFetch(uFlatS, px, 0).rgb);
+        float y = p.y / IMG_SIZE.y;
+        if (hsv.x > 0.48 && hsv.x < 0.75 && hsv.y > 0.15 && y < 0.55) {
+            float a = pow(clamp(1.0 - y / 0.42, 0.0, 1.0), 1.3) * 0.95 * ST_BOKASHI;
+            rgb = mix(rgb, vec3(0.086, 0.196, 0.353), a);
+        }
+    }
+
+    if (ST_CAUSTICS > 0.0) {
+        // Hockney's pool: ridges of domain-warped Worley noise, squashed with depth
+        vec3 hsv = rgb2hsv(textureLod(uSrc, p / IMG_SIZE, 2.0).rgb);
+        float y = p.y / IMG_SIZE.y;
+        float water = smoothstep(0.42, 0.46, hsv.x) * smoothstep(0.64, 0.6, hsv.x)
+                    * smoothstep(0.2, 0.3, hsv.y) * smoothstep(0.38, 0.45, y);
+        if (water > 0.0) {
+            float depth = clamp((y - 0.4) / 0.6, 0.0, 1.0);
+            float s = ST_CAUSTIC_SCALE * (0.4 + 1.0 * depth);
+            vec2 q = vec2(p.x / s, p.y / (s * (0.45 + 0.55 * depth)));
+            q += 0.45 * vec2(fbm(q * 0.8 + 5.2, 3, 1901u), fbm(q * 0.8 - 3.7, 3, 1903u));
+            uint id; vec2 fp;
+            vec2 f = worley(q, 1905u, id, fp);
+            float net = exp(-pow((f.y - f.x) / 0.07, 2.0));
+            vec2 q2 = q * 1.7 + vec2(11.0, -5.0);
+            q2 += 0.6 * vec2(fbm(q2 * 0.9, 3, 1907u), fbm(q2 * 0.9 + 3.0, 3, 1909u));
+            vec2 g = worley(q2, 1911u, id, fp);
+            float net2 = exp(-pow((g.y - g.x) / 0.056, 2.0));
+            rgb = mix(rgb, vec3(0.95, 0.99, 1.0), clamp(net * 0.85, 0.0, 1.0) * water * ST_CAUSTICS);
+            rgb = mix(rgb, vec3(0.16, 0.36, 0.62), clamp(net2 * 0.45 * (1.0 - net), 0.0, 1.0) * water * ST_CAUSTICS);
+        }
+    }
+
+    if (flat_ && ST_OUTLINE > 0.0) {
+        // keyline: drawn only where neighbouring regions differ in value
+        vec4 me = texelFetch(uFlatS, px, 0);
+        float w = max(ST_OUTLINE_WIDTH * 0.5, 0.5)
+                * (1.0 + 0.25 * fbm(p / 25.0, 3, 2001u));
+        float line = 0.0;
+        for (int k = 0; k < 8; ++k) {
+            float a = float(k) * PI / 4.0;
+            ivec2 q = clamp(ivec2(p + w * vec2(cos(a), sin(a))), ivec2(0), size - 1);
+            vec4 o = texelFetch(uFlatS, q, 0);
+            if (abs(o.a - me.a) > 1e-4 && abs(luma(o.rgb) - luma(me.rgb)) > ST_OUTLINE_CONTR)
+                line = 1.0;
+        }
+        rgb = mix(rgb, vec3(0.11, 0.1, 0.095), line * ST_OUTLINE);
+    }
+
+    if (ST_FACET > 0.0) {
+        // Analytic cubism: each Voronoi plane is lit from its own side
+        // (passage), and a random subset of plane edges is drawn dark.
+        float cell = max(ST_FACET_CELL, 4.0);
+        uint id; vec2 fp;
+        vec2 f = worley(p / cell, 2101u, id, fp);
+        float a = hash01(id) * 2.0 * PI;
+        float t = dot(p / cell - fp, vec2(cos(a), sin(a)));
+        rgb *= clamp(1.0 + ST_FACET * 0.45 * t, 0.4, 1.6);
+        float e = exp(-pow((f.y - f.x) / 0.035, 2.0)) * ((hash01(id ^ 0x77u) < 0.55) ? 1.0 : 0.0);
+        rgb = mix(rgb, vec3(0.17, 0.14, 0.11), e * ST_FACET * 0.85);
+    }
+
+    if (ST_CONTOUR > 0.0) rgb = mix(rgb, ST_CONTOUR_COLOR, contourLine(p) * ST_CONTOUR);
+
+    if (ST_BORDER > 0.0) {
+        // Hockney's band of unpainted canvas
+        float b = ST_BORDER * min(IMG_SIZE.x, IMG_SIZE.y);
+        float inside = min(min(p.x, IMG_SIZE.x - p.x), min(p.y, IMG_SIZE.y - p.y));
+        rgb = mix(rgb, ST_GROUND, clamp(b - inside + 0.5, 0.0, 1.0));
+    }
+
+    if (ST_RAIN > 0.0) {
+        float r = rainAt(p) * ST_RAIN;
+        rgb = 1.0 - (1.0 - rgb) * (1.0 - vec3(0.92, 0.92, 0.88) * r);
+    }
+    imageStore(uOut, px, vec4(clamp(rgb, 0.0, 1.0), 1.0));
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= int(IMG_SIZE.x) || px.y >= int(IMG_SIZE.y)) return;
+    if (uPass == 0) smearPass(px);
+    else if (uPass == 1) washPass(px);
+    else overlayPass(px);
+}

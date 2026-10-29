@@ -1,5 +1,6 @@
 #include "pipeline.h"
 #include "brush_atlas.h"
+#include "live_resolution.h"
 
 #include <algorithm>
 #include <cmath>
@@ -84,9 +85,11 @@ bool Pipeline::init() {
 
     m_etfMaxBuf = glu::createBuffer(GL_SHADER_STORAGE_BUFFER, 4, nullptr, GL_DYNAMIC_COPY);
 
-    m_tRef.init(); m_tError.init(); m_tSeeds.init();
-    m_tTrace.init(); m_tRaster.init(); m_tImpasto.init(); m_tRelax.init();
-    m_tEtf.init(); m_tFlow.init();
+    if (m_diagnosticsEnabled) {
+        m_tRef.init(); m_tError.init(); m_tSeeds.init();
+        m_tTrace.init(); m_tRaster.init(); m_tImpasto.init(); m_tRelax.init();
+        m_tEtf.init(); m_tFlow.init();
+    }
     return true;
 }
 
@@ -103,6 +106,7 @@ void Pipeline::shutdown() {
     glDeleteTextures(18, texs);
     if (m_canvasFbo) glDeleteFramebuffers(1, &m_canvasFbo);
     if (m_srcFbo) glDeleteFramebuffers(1, &m_srcFbo);
+    if (m_inputFbo) glDeleteFramebuffers(1, &m_inputFbo);
     if (m_vao) glDeleteVertexArrays(1, &m_vao);
 }
 
@@ -201,6 +205,7 @@ void Pipeline::resize(int w, int h) {
 
     glCreateFramebuffers(1, &m_srcFbo);
     glNamedFramebufferTexture(m_srcFbo, GL_COLOR_ATTACHMENT0, m_srcTex, 0);
+    if (!m_inputFbo) glCreateFramebuffers(1, &m_inputFbo);
 
     // Two floats per 16x16 workgroup. energy.comp needs one (its partial
     // sum); etf.comp's coherence pass needs two (a sum and a count), and the
@@ -226,17 +231,32 @@ bool Pipeline::setSource(const unsigned char* rgba, int w, int h) {
     return true;
 }
 
-bool Pipeline::setSourceTexture(GLuint texture, int w, int h) {
+bool Pipeline::setSourceTexture(GLuint texture, int w, int h, int maxDimension) {
     if (!texture || w <= 0 || h <= 0) return false;
-    if (w == m_w && h == m_h && m_srcTex) {
+    const auto [outW, outH] = liveOutputSize(w, h, maxDimension);
+    if (outW == m_w && outH == m_h && m_srcTex) {
         glCopyImageSubData(m_srcTex, GL_TEXTURE_2D, 0, 0, 0, 0,
-                           m_prevSrcTex, GL_TEXTURE_2D, 0, 0, 0, 0, w, h, 1);
+                           m_prevSrcTex, GL_TEXTURE_2D, 0, 0, 0, 0, outW, outH, 1);
     }
-    resize(w, h);
-    glCopyImageSubData(texture, GL_TEXTURE_2D, 0, 0, 0, 0,
-                       m_srcTex, GL_TEXTURE_2D, 0, 0, 0, 0, w, h, 1);
+    resize(outW, outH);
+    if (outW == w && outH == h) {
+        glCopyImageSubData(texture, GL_TEXTURE_2D, 0, 0, 0, 0,
+                           m_srcTex, GL_TEXTURE_2D, 0, 0, 0, 0, outW, outH, 1);
+    } else {
+        glNamedFramebufferTexture(m_inputFbo, GL_COLOR_ATTACHMENT0, texture, 0);
+        glBlitNamedFramebuffer(m_inputFbo, m_srcFbo, 0, 0, w, h,
+                               0, 0, outW, outH, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glNamedFramebufferTexture(m_inputFbo, GL_COLOR_ATTACHMENT0, 0, 0);
+    }
     glGenerateTextureMipmap(m_srcTex);
     return true;
+}
+
+void Pipeline::setDiagnosticsEnabled(bool on) {
+    m_diagnosticsEnabled = on;
+    m_tRef.setEnabled(on); m_tError.setEnabled(on); m_tSeeds.setEnabled(on);
+    m_tTrace.setEnabled(on); m_tRaster.setEnabled(on); m_tImpasto.setEnabled(on);
+    m_tRelax.setEnabled(on); m_tEtf.setEnabled(on); m_tFlow.setEnabled(on);
 }
 
 void Pipeline::buildBrushTiles(const std::vector<float>& radii, float bristleDensity) {
@@ -372,7 +392,8 @@ void Pipeline::applyEtf(const TuningParams& p, const RenderConfig& cfg) {
     // Measured before the early return as well, so that `--etf 0` still reports
     // the plain field's coherence -- the baseline the ETF figure has to be read
     // against. Without it the number says nothing.
-    if (m_logEtf) m_etfLog.push_back({measureFlowCoherence(), -1.0});
+    if (m_logEtf && m_diagnosticsEnabled)
+        m_etfLog.push_back({measureFlowCoherence(), -1.0});
     if (!run) return;
 
     const uint32_t gx = divUp(uint32_t(m_w), 16), gy = divUp(uint32_t(m_h), 16);
@@ -412,7 +433,8 @@ void Pipeline::applyEtf(const TuningParams& p, const RenderConfig& cfg) {
     }
     endStage(m_tEtf, m_ms.etf);
 
-    if (m_logEtf) m_etfLog.back().second = measureFlowCoherence();
+    if (m_logEtf && m_diagnosticsEnabled)
+        m_etfLog.back().second = measureFlowCoherence();
 }
 
 // Mean |t(x).t(y)| between a pixel's tangent and its eight neighbours', over
@@ -522,7 +544,7 @@ void Pipeline::computeFlow(const TuningParams& p, const RenderConfig& cfg) {
     endStage(m_tFlow, m_ms.flow);
     m_flowValid = true;
 
-    if (m_logFlow) {
+    if (m_logFlow && m_diagnosticsEnabled) {
         // Reads the field back, so it stalls. The mean and max magnitude are
         // the first thing to look at when advection is not helping: a field of
         // zeros means the stage never ran or the windows were all rejected,
@@ -587,7 +609,7 @@ void Pipeline::layUnderpaint(TuningParams& p, const RenderConfig& cfg,
         glBindImageTexture(1, m_diffTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R16F);
         glDispatchCompute(gxi, gyi, 1);
 
-        if (m_logFlow) {
+        if (m_logFlow && m_diagnosticsEnabled) {
             // What the cells are actually gated on. seeds.comp skips a cell
             // when the *maximum* difference inside it is below the threshold,
             // so the mean alone does not say whether anything will be skipped
@@ -733,7 +755,7 @@ void Pipeline::relax(TuningParams& p, const RenderConfig& cfg,
     m_tRelax.begin();
     const uint32_t subs = uint32_t(std::max(1, cfg.relaxSubPasses));
 
-    if (m_logRelax) m_relaxLog.push_back(measureEnergy());
+    if (m_logRelax && m_diagnosticsEnabled) m_relaxLog.push_back(measureEnergy());
 
     for (int iter = 0; iter < cfg.relaxIterations; ++iter) {
         p.relaxIter = float(iter);
@@ -758,14 +780,19 @@ void Pipeline::relax(TuningParams& p, const RenderConfig& cfg,
         // changes, so sub-passes no longer have to see each other's paint --
         // they did when the score was measured against the live canvas.
         repaintFromPool(p, cfg, radii);
-        if (m_logRelax) m_relaxLog.push_back(measureEnergy());
+        if (m_logRelax && m_diagnosticsEnabled) m_relaxLog.push_back(measureEnergy());
     }
 
-    glGetNamedBufferSubData(m_poolCounterBuf, 0, GLsizeiptr(sizeof(counters)), counters);
-    m_relaxRemoved = counters[2];
-    m_relaxAccepted = counters[3];
+    if (m_diagnosticsEnabled) {
+        glGetNamedBufferSubData(m_poolCounterBuf, 0, GLsizeiptr(sizeof(counters)), counters);
+        m_relaxRemoved = counters[2];
+        m_relaxAccepted = counters[3];
+    } else {
+        m_relaxRemoved = 0;
+        m_relaxAccepted = 0;
+    }
 
-    if (m_logRelax) {
+    if (m_logRelax && m_diagnosticsEnabled) {
         // What relaxation actually did to the geometry. Read from the pool,
         // because the trace counters predate it.
         struct Hdr { uint32_t vertexCount, layerTex, color; float totalLen; };
@@ -840,11 +867,12 @@ void Pipeline::render(const TuningParams& base, const RenderConfig& cfg, bool te
     if (m_logRelax) m_relaxLog.clear(); // report the current frame, not a run
     if (m_logEtf) m_etfLog.clear();
     m_layers.assign(radii.size(), LayerStats());
-    readStats();
+    if (m_diagnosticsEnabled) readStats();
     // A fresh frame starts with the slots it is about to fill zeroed, so a
     // layer that now needs fewer chunks does not report stale counts.
     const uint32_t zeroStats = 0;
-    glClearNamedBufferData(m_statsBuf, GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, &zeroStats);
+    if (m_diagnosticsEnabled)
+        glClearNamedBufferData(m_statsBuf, GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, &zeroStats);
 
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, m_paramsUbo);
     uploadParams(p);
@@ -956,7 +984,7 @@ void Pipeline::render(const TuningParams& base, const RenderConfig& cfg, bool te
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
         endStage(m_tError, m_ms.error);
 
-        if (m_debugCells) {
+        if (m_debugCells && m_diagnosticsEnabled) {
             struct CellRec { float meanErr; uint32_t best; float maxDiff; float pad; };
             std::vector<CellRec> rec(cells);
             glGetNamedBufferSubData(m_cellBuf, 0, GLsizeiptr(cells * sizeof(CellRec)), rec.data());
@@ -980,11 +1008,11 @@ void Pipeline::render(const TuningParams& base, const RenderConfig& cfg, bool te
             printf("\n");
         }
 
-        // Threads past seedCount return immediately, but there is no reason
-        // to launch a full buffer's worth for a pass that can only have
-        // produced cells/chunks seeds.
-        const uint32_t traceBound =
-            std::min(SBR_MAX_STROKES, divUp(cells, chunks) + 1024u);
+        // The hash partition is scattered but not guaranteed to divide the
+        // cells evenly. Bound by the worst case for one chunk so every seed
+        // counted by seeds.comp gets a trace invocation; dispatching fewer
+        // threads leaves stale stroke headers that the indirect draw can use.
+        const uint32_t traceBound = std::min(SBR_MAX_STROKES, cells);
 
         for (uint32_t chunk = 0; chunk < chunks; ++chunk) {
             p.chunk = float(chunk);
@@ -1050,8 +1078,9 @@ void Pipeline::render(const TuningParams& base, const RenderConfig& cfg, bool te
             // Stroke count for the overlay, copied GPU-side. Reading the
             // counter here instead would pull a buffer from video to host
             // memory mid-frame and serialise the whole pipeline.
-            glCopyNamedBufferSubData(m_counterBuf, m_statsBuf, 0,
-                                     GLintptr(l * MAX_CHUNKS + chunk) * 16, 16);
+            if (m_diagnosticsEnabled)
+                glCopyNamedBufferSubData(m_counterBuf, m_statsBuf, 0,
+                                         GLintptr(l * MAX_CHUNKS + chunk) * 16, 16);
         }
     }
 

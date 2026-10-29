@@ -19,10 +19,9 @@ to use the bundled copy.
 
 The component starts automatically when loaded. If the timeline is paused,
 its startup callback still runs. On exit or component deletion, it stops its
-renderer process. Windows, an OpenGL 4.6 capable GPU, TouchDesigner, and
-Spout support are required. The TOX is Windows-only because the bundled
-renderer is a Windows executable. A Mac build would need a native GPU
-renderer and Syphon integration; this Windows TOX does not run on macOS. See the [macOS feasibility and port plan](macos-touchdesigner-feasibility.md).
+renderer process. This TOX uses Windows, OpenGL 4.6, TouchDesigner, and Spout.
+The separate Mac Metal worker and its packaged TOX use a different runtime and
+are maintained independently of this Windows Spout component.
 
 ## For maintainers: build the TOX
 
@@ -33,13 +32,16 @@ renderer and Syphon integration; this Windows TOX does not run on macOS. See the
 3. Open **Dialogs → Textport**, set it to Python, and run:
 
    ```python
-   import runpy; runpy.run_path(r'<path-to-repo>\touchdesigner\install_paintify.py')
+   import os, runpy
+   os.environ['PAINTIFY_TOX_OUTPUT'] = r'C:\Users\I3row\AI-Work\ChatGPT\Paintify-Touchdesigner-latest-20261029\Paintify-candidate.tox'
+   runpy.run_path(r'C:\Users\I3row\AI-Work\ChatGPT\Paintify-Touchdesigner-latest-20261029\touchdesigner\install_paintify.py')
    ```
 
-   Replace `<path-to-repo>` with your checkout.
-
-4. The script creates `Paintify.tox` with all runtime files in
-   its virtual file system. Commit it at the repository root; that file is the only thing users download.
+4. The installer embeds the `build-package` executable, DLLs and repository
+   shaders, then saves the candidate at the requested path. Reload that copy
+   in a fresh TouchDesigner project and validate it before replacing the
+   checked-in Windows `Paintify.tox`. The Mac `Paintify-Mac.tox` has its own
+   installer and packaging path.
 
 The installer replaces a component named `paintify` in `/project1`, so build
 the release TOX in a blank project.
@@ -47,9 +49,12 @@ the release TOX in a blank project.
 ## Controls
 
 **Look** is a dropdown: Impressionist, Expressionist, Pointillist, Wash,
-Detail. The main page also provides painted FPS, relaxation, brush texture,
-impasto, temporal repaint, and optical flow. **Brush texture = -1** uses the
-chosen look's preset value.
+Detail. The main page also provides painted FPS, maximum working dimension,
+relaxation, brush texture, impasto, temporal repaint, and optical flow.
+Maximum working dimension defaults to 1280 with aspect ratio preserved; set it
+to 0 for native-size rendering. This cap changes rendering resolution and
+therefore visible detail. **Brush texture = -1** uses the chosen look's preset
+value.
 
 **Paintify Advanced** exposes the other live-compatible GPU-SBR controls:
 radii, threshold, curvature, opacity, grid spacing, stroke lengths,
@@ -57,10 +62,12 @@ underpaint, painting passes, tensor smoothing, edge tangent flow, bristle
 density, texture taper, dry brush, light angle, jitters, relaxation tuning,
 and optical flow iterations. Numeric advanced controls default to `-1`,
 which leaves the renderer's preset or default intact. Empty radii and
-**Underpaint: Use look** likewise leave the preset intact. Look, FPS, and
-painting controls update the running renderer without restarting it. Toggling
-**Paintify active** or changing the executable override still starts or stops
-the renderer.
+**Underpaint: Use look** likewise leave the preset intact. The interactive
+defaults are **Relax = 0** and **Passes = 4**. For quality output, set **Passes
+= 8** and **Relax = 4**; relaxation repaints the full canvas per iteration and
+can sharply reduce live throughput. Look, FPS, and painting controls update
+the running renderer without restarting it. Toggling **Paintify active** or
+changing the executable override still starts or stops the renderer.
 
 CLI-only options for loading/saving files, batch rendering, video encoding,
 and diagnostics are not relevant to a live TOP component.

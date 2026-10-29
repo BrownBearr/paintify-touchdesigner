@@ -1,0 +1,5 @@
+{
+  "repository": "https://github.com/BrownBearr/Paintify-GPU",
+  "commit": "205a4cf96e86c349e9ca10a7ee3805ac3591b6d6",
+  "headless_metal_init": true
+}

@@ -52,7 +52,11 @@ public:
     bool setSource(const unsigned char* rgba, int w, int h);
 
     // GPU-only input path for live Spout frames. The texture must be RGBA8.
-    bool setSourceTexture(GLuint texture, int w, int h);
+    bool setSourceTexture(GLuint texture, int w, int h, int maxDimension = 0);
+
+    // Live mode disables GPU timer queries and the synchronous stroke-count
+    // readback. Offline renders retain diagnostics by default.
+    void setDiagnosticsEnabled(bool on);
 
     // (Re)generates the brush tiles for a set of radii. Called whenever the
     // radii or bristle density change; costs well under a millisecond.
@@ -192,6 +196,7 @@ private:
     int m_flowW = 0, m_flowH = 0;
     bool m_flowValid = false;
     GLuint m_canvasTex = 0, m_heightTex = 0, m_canvasFbo = 0, m_srcFbo = 0;
+    GLuint m_inputFbo = 0;
     GLuint m_prevSrcTex = 0, m_prevCanvasTex = 0, m_underTex = 0;
     bool m_underValid = false;
     GLuint m_brushTex = 0;
@@ -216,6 +221,7 @@ private:
     float m_brushDensity = -1.f;
 
     bool m_havePrev = false;
+    bool m_diagnosticsEnabled = true;
     bool m_debugCells = false;
     bool m_logRelax = false;
     bool m_logEtf = false;

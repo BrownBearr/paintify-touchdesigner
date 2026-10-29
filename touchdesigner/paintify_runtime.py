@@ -77,6 +77,11 @@ def renderer_args(comp, exe, stopfile, settingsfile):
             '--live-settings-file', str(settingsfile),
             '--target-fps', str(comp.par.Fps.eval()),
             '--preset', str(comp.par.Preset.eval())]
+    # Older saved TOXs do not have this custom parameter. Leave their source
+    # at native size; newly installed components expose an explicit cap.
+    max_dimension = getattr(comp.par, 'Maxdimension', None)
+    if max_dimension is not None:
+        args.extend(('--live-max-dimension', str(max_dimension.eval())))
     for parameter, flag in (
             ('Relax', '--relax'),
             ('Brushtexture', '--brush-texture'),
@@ -121,9 +126,13 @@ def renderer_args(comp, exe, stopfile, settingsfile):
 
 def _write_settings(settingsfile, args):
     # One argument per line; atomic replace prevents the renderer reading half a change.
+    contents = '\n'.join(args[1:]) + '\n'
+    if settingsfile.is_file() and settingsfile.read_text(encoding='utf-8') == contents:
+        return False
     temporary = settingsfile.with_name(settingsfile.name + '.tmp')
-    temporary.write_text('\n'.join(args[1:]) + '\n', encoding='utf-8')
+    temporary.write_text(contents, encoding='utf-8')
     os.replace(temporary, settingsfile)
+    return True
 
 
 def update(comp):

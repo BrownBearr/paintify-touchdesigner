@@ -1,0 +1,50 @@
+{
+  "platform": "Windows packaging only; native Metal runtime not executed",
+  "original_unchanged": true,
+  "output": "C:\\Users\\I3row\\AI-Work\\ChatGPT\\Paintify-Touchdesigner-latest-20261029\\Paintify-Mac-Optimized.tox",
+  "embedded_runtime_sha256": "c222ebb3afe5ba12feb4f6d2bfb9d433af4ea109fbaac27920d4e32e1335bfb5",
+  "runtime_matches_source": true,
+  "resolution": "50",
+  "resize_mode": "half",
+  "vfs_files": [
+    "runtime/PaintifyMetal.app/Contents/Info.plist",
+    "runtime/PaintifyMetal.app/Contents/MacOS/paintify-metal",
+    "runtime/PaintifyMetal.app/Contents/Resources/licenses/glfw.txt",
+    "runtime/PaintifyMetal.app/Contents/Resources/licenses/glm.txt",
+    "runtime/PaintifyMetal.app/Contents/Resources/licenses/glslang.txt",
+    "runtime/PaintifyMetal.app/Contents/Resources/licenses/imgui.txt",
+    "runtime/PaintifyMetal.app/Contents/Resources/licenses/spirv_cross.txt",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/blur.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/canvas.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/common.glsl",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/energy.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/error.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/etf.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/features.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/finish.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/flat.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/flow.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/impasto.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/pool.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/post.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/relax.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/seeds.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/stroke.frag",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/stroke.vert",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/style.glsl",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/stylefield.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/support.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/shaders/trace.comp",
+    "runtime/PaintifyMetal.app/Contents/Resources/tools/glslang",
+    "runtime/PaintifyMetal.app/Contents/_CodeSignature/CodeResources"
+  ],
+  "gpu_resize_size": [
+    320,
+    180
+  ],
+  "bypass_size": [
+    640,
+    360
+  ],
+  "bypass_errors": ""
+}

@@ -1,0 +1,81 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// Flat colour for the print / acrylic / watercolour styles (brushkit
+// source.kuwahara + source.quantize + effects.flat_fill).
+//   pass 0: Kuwahara filter of the source -> uFlat.rgb
+//   pass 1: quantize uFlat to the style palette (or posterize in Lab), write
+//           the flat fill to the canvas and the region label to uFlat.a
+// No k-means on the GPU: the style's own pigment set is the palette, which is
+// what a printer or a naive painter actually has.
+
+layout(binding = 0) uniform sampler2D uSrc;
+layout(rgba16f, binding = 0) uniform image2D uFlat;
+layout(rgba16f, binding = 1) uniform writeonly image2D uCanvas;
+
+uniform int uPass;
+
+float woodGrain(vec2 p) {
+    float warp = 14.0 * fbm(vec2(p.x / 400.0, p.y / 90.0), 4, 1601u);
+    float rings = sin((p.y + warp) / 3.2 + 3.0 * fbm(p / 300.0, 2, 1603u));
+    return rings * 0.6 + 0.4 * fbm(vec2(p.x / 80.0, p.y / 3.0), 2, 1605u);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(IMG_SIZE);
+    if (px.x >= size.x || px.y >= size.y) return;
+
+    if (uPass == 0) {
+        // Kuwahara: each pixel takes the mean of its least-varying quadrant --
+        // flattens texture into painterly patches while keeping edges crisp.
+        int r = clamp(int(ST_KUWAHARA + 0.5), 1, 8);
+        vec3 bestMean = vec3(0.0);
+        float bestVar = 1e20;
+        for (int q = 0; q < 4; ++q) {
+            ivec2 dir = ivec2((q & 1) == 0 ? -1 : 1, (q & 2) == 0 ? -1 : 1);
+            vec3 s = vec3(0.0), s2 = vec3(0.0);
+            float n = 0.0;
+            for (int j = 0; j <= r; ++j) for (int i = 0; i <= r; ++i) {
+                vec3 c = texelFetch(uSrc, clamp(px + ivec2(i, j) * dir, ivec2(0), size - 1), 0).rgb;
+                s += c; s2 += c * c; n += 1.0;
+            }
+            vec3 m = s / n;
+            float var = dot(s2 / n - m * m, vec3(1.0));
+            if (var < bestVar) { bestVar = var; bestMean = m; }
+        }
+        imageStore(uFlat, px, vec4(bestMean, 0.0));
+        return;
+    }
+
+    vec3 k = imageLoad(uFlat, px).rgb;
+    vec3 c = styleColor(k, 0u, false);
+    float label;
+    int n = int(ST_PAL_COUNT);
+    if (n > 0 && ST_POSTERIZE < 0.5) {
+        int idx = paletteNearest(rgb2lab(c), 1.0);   // keep the value structure
+        c = bkPal[idx].rgb;
+        label = float(idx) / 16.0;
+    } else {
+        vec3 lab = rgb2lab(c);
+        float step_ = 100.0 / max(ST_POSTERIZE, 2.0);
+        vec3 q = vec3(floor(lab.x / step_ + 0.5) * step_, floor(lab.yz / 12.0 + 0.5) * 12.0);
+        c = lab2rgb(q);
+        if (n > 0 && ST_PAL_PULL > 0.0) {
+            vec3 tgt = rgb2lab(bkPal[paletteNearest(q, 0.35)].rgb);
+            tgt.x = q.x;
+            c = lab2rgb(mix(q, tgt, ST_PAL_PULL));
+        }
+        uint hq = uint(q.x + 1.0) * 31u + uint(q.y + 140.0) * 7u + uint(q.z + 140.0);
+        label = float(hq % 997u) / 997.0;
+    }
+    imageStore(uFlat, px, vec4(c, label));
+
+    vec2 p = vec2(px) + 0.5;
+    float var = ST_FLAT_MOTTLE * fbm(p / 40.0, 4, 1611u);
+    if (ST_WOODGRAIN > 0.0) var += ST_WOODGRAIN * woodGrain(p);
+    imageStore(uCanvas, px, vec4(clamp(c * (1.0 + var), 0.0, 1.0), 1.0));
+}

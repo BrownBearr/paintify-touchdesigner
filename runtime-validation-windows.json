@@ -1,0 +1,67 @@
+{
+  "original_unchanged": true,
+  "packaged_output": "C:\\Users\\I3row\\AI-Work\\ChatGPT\\Paintify-Touchdesigner-latest-20261029\\Paintify-Optimized.tox",
+  "runtime_matches_source": true,
+  "renderer_matches_build": true,
+  "defaults": {
+    "Fps": 12.0,
+    "Relax": 0,
+    "Passes": 4,
+    "Maxdimension": 1280
+  },
+  "reset_defaults": {
+    "Fps": 12.0,
+    "Relax": 0,
+    "Passes": 4,
+    "Maxdimension": 1280
+  },
+  "stages": [
+    {
+      "label": "initial_640x360",
+      "output_size": [
+        640,
+        360
+      ],
+      "mean": 0.478162944316864,
+      "std": 0.29436972737312317,
+      "errors": "",
+      "renderer_alive": true
+    },
+    {
+      "label": "working_limit_320",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.48776090145111084,
+      "std": 0.2978782057762146,
+      "errors": "",
+      "renderer_alive": true
+    },
+    {
+      "label": "pointillist_live_update",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4588983356952667,
+      "std": 0.33138900995254517,
+      "errors": "",
+      "renderer_alive": true
+    },
+    {
+      "label": "restart",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4583020508289337,
+      "std": 0.3319264352321625,
+      "errors": "",
+      "renderer_alive": true
+    }
+  ],
+  "startup_retries": 1,
+  "stopped": true,
+  "final_stopped": true
+}

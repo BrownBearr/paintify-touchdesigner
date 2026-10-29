@@ -1,0 +1,23 @@
+{
+  "Paintify-Optimized.tox": {
+    "loaded": true,
+    "runtime_matches_source": true,
+    "sha256": "439393ecc4581ee7a8c311bbac5612f9bccddc42dd6dc54b250c0f196d1d441d",
+    "bytes": 593958,
+    "reset_defaults": {
+      "Fps": 12.0,
+      "Relax": 0,
+      "Passes": 4,
+      "Maxdimension": 1280
+    },
+    "renderer_matches_build": true
+  },
+  "Paintify-Mac-Optimized.tox": {
+    "loaded": true,
+    "runtime_matches_source": true,
+    "sha256": "e18a2d013cf3c0107cbab1802e6f479b567e23a637a74ddbc69ace716de4b373",
+    "bytes": 2380600,
+    "resolution_default": "50",
+    "resize_mode": "half"
+  }
+}

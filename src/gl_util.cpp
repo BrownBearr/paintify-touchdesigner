@@ -180,11 +180,13 @@ void GpuTimer::init() {
     if (!q[0]) glGenQueries(2, q);
 }
 void GpuTimer::begin() {
+    if (!enabled) return;
     if (!q[0]) init();
     glBeginQuery(GL_TIME_ELAPSED, q[cur]);
     started = true;
 }
 void GpuTimer::end() {
+    if (!enabled) { lastMs = 0.0; return; }
     if (!started) return;
     glEndQuery(GL_TIME_ELAPSED);
     started = false;

@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -90,6 +91,8 @@ struct Options {
     std::string liveSettingsFile;
     uint32_t liveParentPid = 0;
     double targetFps = 12.0;
+    int liveMaxDimension = 1280;
+    bool liveMaxDimensionValid = true;
     std::string in;
     std::string out = "out.png";
     int dump = 0;
@@ -140,6 +143,7 @@ void usage() {
         "  --spout-in <name>       live input sender name (Paintify Input)\n"
         "  --spout-out <name>      live output sender name (Paintify Output)\n"
         "  --target-fps <n>        live painted frames per second (12)\n"
+        "  --live-max-dimension <n> max live output dimension (1280; 0 = native)\n"
         "  --live-stop-file <path> exit live mode when this file appears\n"
         "  --live-settings-file <path> reload live controls from this file\n"
         "  --live-parent-pid <n>  exit if the owning process closes\n"
@@ -232,6 +236,18 @@ Options parseArgs(int argc, char** argv) {
         else if (a == "--spout-in")        o.spoutIn = next(i);
         else if (a == "--spout-out")       o.spoutOut = next(i);
         else if (a == "--target-fps")      o.targetFps = atof(next(i));
+        else if (a == "--live-max-dimension") {
+            const char* raw = next(i);
+            char* end = nullptr;
+            errno = 0;
+            const long value = std::strtol(raw, &end, 10);
+            if (end == raw || *end != '\0' || errno == ERANGE || value < 0 || value > 32768) {
+                fprintf(stderr, "invalid --live-max-dimension '%s' (expected 0..32768)\n", raw);
+                o.liveMaxDimensionValid = false;
+            } else {
+                o.liveMaxDimension = int(value);
+            }
+        }
         else if (a == "--live-stop-file")   o.liveStopFile = next(i);
         else if (a == "--live-settings-file") o.liveSettingsFile = next(i);
         else if (a == "--live-parent-pid")   o.liveParentPid = uint32_t(std::strtoul(next(i), nullptr, 10));
@@ -715,6 +731,7 @@ void printTimings(const Pipeline& pipe, float relaxAreaWeight) {
 
 int main(int argc, char** argv) {
     const Options opt = parseArgs(argc, argv);
+    if (!opt.liveMaxDimensionValid) return 2;
 
     if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -738,6 +755,7 @@ int main(int argc, char** argv) {
     printf("GL %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
 
     Pipeline pipe;
+    pipe.setDiagnosticsEnabled(!opt.liveSpout);
     if (!pipe.init()) return 1;
     pipe.setDebugCells(opt.debugCells);
     pipe.setRelaxLogging(opt.relaxLog);
@@ -762,13 +780,14 @@ int main(int argc, char** argv) {
         live.inputName = opt.spoutIn;
         live.outputName = opt.spoutOut;
         live.fps = opt.targetFps;
+        live.maxDimension = opt.liveMaxDimension;
         live.stopFile = opt.liveStopFile;
         live.parentPid = opt.liveParentPid;
         if (!opt.liveSettingsFile.empty()) {
             live.reloadSettings = [path = opt.liveSettingsFile,
                                    previous = std::string{}]
                                   (TuningParams& current, RenderConfig& config,
-                                   double& fps) mutable -> bool {
+                                   double& fps, int& maxDimension) mutable -> bool {
                 std::ifstream file(path, std::ios::binary);
                 if (!file) return false;
                 const std::string contents((std::istreambuf_iterator<char>(file)),
@@ -786,6 +805,10 @@ int main(int argc, char** argv) {
                 for (std::string& argument : arguments)
                     argv.push_back(argument.data());
                 const Options updated = parseArgs(int(argv.size()), argv.data());
+                if (!updated.liveMaxDimensionValid) {
+                    previous = contents;
+                    return false;
+                }
                 TuningParams fresh;
                 RenderConfig freshConfig;
                 resolveLook(updated, fresh, freshConfig, nullptr, nullptr);
@@ -793,6 +816,7 @@ int main(int argc, char** argv) {
                 current = fresh;
                 config = freshConfig;
                 fps = updated.targetFps;
+                maxDimension = updated.liveMaxDimension;
                 previous = contents;
                 std::printf("Paintify live settings updated\n");
                 std::fflush(stdout);
