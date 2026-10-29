@@ -4,12 +4,13 @@ Textport: import runpy; runpy.run_path(r'PATH_TO_THIS_FILE')
 """
 
 from pathlib import Path
+import os
 
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / ('build-package' if (ROOT / 'build-package' / 'gpu-sbr.exe').is_file() else 'build-live')
 EXE = BUILD / 'gpu-sbr.exe'
-TOX = ROOT / 'Paintify.tox'
+TOX = Path(os.environ.get('PAINTIFY_TOX_OUTPUT', ROOT / 'Paintify.tox'))
 
 if not EXE.is_file():
     raise FileNotFoundError(f'Build the Paintify GPU renderer first: {EXE}')
@@ -33,8 +34,15 @@ def onExit():
 PAR_EXECUTE = r'''
 def onValueChange(par, prev):
     comp = parent()
+    if comp.op('paintify_ui').module.change(comp, par):
+        return
     comp.op('paintify_runtime').module.update(comp)
     return
+
+def onPulse(par):
+    comp = parent()
+    if not comp.op('paintify_ui').module.pulse(comp, par.name):
+        comp.op('paintify_runtime').module.pulse(comp, par.name)
 '''
 
 OP_EXECUTE = r'''
@@ -71,6 +79,7 @@ def install():
     comp.par.Preset.menuLabels = ['Impressionist', 'Expressionist',
                                   'Pointillist', 'Wash', 'Detail']
     page.appendFloat('Fps', label='Painted frames / sec')
+    page.appendInt('Maxdimension', label='Maximum working dimension (0 = native)')
     page.appendInt('Relax', label='Relaxation iterations')
     page.appendFloat('Brushtexture', label='Brush texture (-1 = look)')
     page.appendFloat('Impasto', label='Impasto height')
@@ -112,7 +121,8 @@ def install():
     comp.par.Executable = ''
     comp.par.Preset = 'impressionist'
     comp.par.Fps = 12
-    comp.par.Relax = 4
+    comp.par.Maxdimension = 1280
+    comp.par.Relax = 0
     comp.par.Brushtexture = -1
     comp.par.Impasto = 0.35
     comp.par.Impastolight = 0.5
@@ -121,13 +131,20 @@ def install():
     comp.par.Radii = ''
     comp.par.Underpaint = 'preset'
     for name in ('Threshold', 'Curvature', 'Opacity', 'Gridfactor',
-                 'Maxlen', 'Minlen', 'Passes', 'Tensorsigma', 'Etf',
+                 'Maxlen', 'Minlen', 'Tensorsigma', 'Etf',
                  'Etfradius', 'Bristledensity', 'Texturetaper', 'Drybrush',
                  'Lightangle', 'Sizejitter', 'Anglejitter', 'Opacityjitter',
                  'Relaxarea', 'Relaxmove', 'Relaxcandidates', 'Relaxremove',
                  'Relaxsubpasses', 'Flowiters'):
         getattr(comp.par, name).val = -1
+    # Four passes reduce live dispatch work. Set Passes=8 and Relax=4 for
+    # fidelity-oriented output; relaxation repaints the whole canvas each time.
+    comp.par.Passes = 4
     comp.par.Jitterperframe = False
+    # Persist reset-to-default values as well as current values in the TOX.
+    for par in comp.customPars:
+        if par.style != 'Pulse' and not par.readOnly:
+            par.default = par.eval()
 
     source = comp.create('inTOP', 'source')
     send = comp.create('syphonspoutoutTOP', 'send_to_paintify')
@@ -150,6 +167,8 @@ def install():
 
     runtime = comp.create('textDAT', 'paintify_runtime')
     runtime.text = RUNTIME
+    ui = comp.create('textDAT', 'paintify_ui')
+    ui.text = (ROOT / 'touchdesigner/tox_ui.py').read_text(encoding='utf-8')
     lifecycle = comp.create('executeDAT', 'paintify_lifecycle')
     lifecycle.text = EXECUTE
     lifecycle.par.create = True
@@ -158,14 +177,16 @@ def install():
     controls.text = PAR_EXECUTE
     controls.par.op = '..'
     controls.par.pars = ('Active Executable Preset Fps Relax Brushtexture Impasto '
-                         'Impastolight Temporal Flow Radii Threshold Curvature '
+                         'Maxdimension Impastolight Temporal Flow Radii Threshold Curvature '
                          'Opacity Gridfactor Maxlen Minlen Underpaint Passes '
                          'Tensorsigma Etf Etfradius Bristledensity Texturetaper '
                          'Drybrush Lightangle Sizejitter Anglejitter Opacityjitter '
                          'Relaxarea Relaxmove Relaxcandidates Relaxremove '
-                         'Relaxsubpasses Flowiters Jitterperframe')
+                         'Relaxsubpasses Flowiters Jitterperframe Performance Restart Help')
     controls.par.valuechange = True
+    controls.par.onpulse = True
     controls.par.custom = True
+    controls.par.builtin = False
     cleanup = comp.create('opexecuteDAT', 'paintify_cleanup')
     cleanup.text = OP_EXECUTE
     cleanup.par.op = '..'
@@ -179,6 +200,7 @@ def install():
     for path in sorted((ROOT / 'shaders').glob('*')):
         if path.is_file():
             comp.vfs.addFile(str(path), overrideName='runtime/shaders/' + path.name)
+    ui.module.configure(comp)
     comp.save(str(TOX), createFolders=True)
     runtime.module.start(comp)
     print('Paintify component saved to ' + str(TOX))

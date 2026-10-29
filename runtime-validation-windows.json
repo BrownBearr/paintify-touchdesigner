@@ -1,0 +1,83 @@
+{
+  "original_unchanged": true,
+  "packaged_output": "C:\\Users\\I3row\\AI-Work\\ChatGPT\\Paintify-Touchdesigner-latest-20261029\\Paintify-Optimized.tox",
+  "runtime_matches_source": true,
+  "renderer_matches_build": true,
+  "defaults": {
+    "Fps": 12.0,
+    "Relax": 0,
+    "Passes": 4,
+    "Maxdimension": 1280
+  },
+  "reset_defaults": {
+    "Fps": 12.0,
+    "Relax": 0,
+    "Passes": 4,
+    "Maxdimension": 1280
+  },
+  "stages": [
+    {
+      "label": "initial_640x360",
+      "output_size": [
+        640,
+        360
+      ],
+      "mean": 0.4797523021697998,
+      "std": 0.2942717671394348,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
+    },
+    {
+      "label": "working_limit_320",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.48379480838775635,
+      "std": 0.2946951687335968,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
+    },
+    {
+      "label": "pointillist_live_update",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4585185945034027,
+      "std": 0.33175477385520935,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
+    },
+    {
+      "label": "restart",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4592040181159973,
+      "std": 0.3313799798488617,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
+    },
+    {
+      "label": "renamed_component",
+      "output_size": [
+        320,
+        180
+      ],
+      "mean": 0.4591043293476105,
+      "std": 0.33110538125038147,
+      "errors": "",
+      "renderer_alive": true,
+      "status": "Running"
+    }
+  ],
+  "stopped": true,
+  "rename_registry_path_matches": true,
+  "final_stopped": true
+}

@@ -1,23 +1,27 @@
 # macOS TouchDesigner feasibility
 
-Status: researched, not implemented or tested on macOS. The current `Paintify.tox` is a Windows package.
+Status: this document records the original feasibility investigation. A separate
+Mac Metal worker branch has since been integrated; its implementation and
+packaged `Paintify-Mac.tox` are maintained separately from the Windows Spout
+component. The existence of that branch does not establish runtime or
+performance validation on Mac hardware.
 
 ## Conclusion
 
-A macOS component with the same painting controls and algorithms is technically feasible on a supported Mac, especially Apple Silicon. It requires a native GPU renderer and a Syphon video bridge. The present Windows `.exe`, DLLs, OpenGL 4.6 shaders, and Spout bridge cannot be relabeled as a Mac `.tox`. Visual and performance parity remain unproven until the port is built and compared on Mac hardware.
+A macOS component needs a native GPU renderer and a Syphon video bridge. The Windows `.exe`, DLLs, OpenGL 4.6 shaders, and Spout bridge cannot be relabeled as a Mac `.tox`. The Mac Metal work is a distinct implementation; visual and performance parity require validation on Mac hardware.
 
 TouchDesigner itself supports macOS and provides Syphon Spout In/Out TOPs: Spout is the Windows route; Syphon is the macOS route. Apple documents Metal compute and GPU-generated indirect draw commands, which cover the core classes of work used by Paintify. These APIs make a port plausible; they do not automatically translate this project's shaders or guarantee identical output.
 
 ## Current code versus a Mac port
 
-| Feature | Current Windows component | macOS work needed |
+| Feature | Windows component | Original Mac port plan (pre-implementation) |
 | --- | --- | --- |
-| TOP input and output | Spout sender/receiver in `src/live_spout.cpp` | SyphonMetalClient and SyphonMetalServer, with unique sender names per component |
+| TOP input and output | Spout sender/receiver in `src/live_spout.cpp` | Implemented through the separate Mac runtime's Syphon bridge; validate on Mac |
 | Painting presets and Look dropdown | Python parameters in `touchdesigner/install_paintify.py` plus shared renderer parameters | Preserve the same menu and parameter names; feed the Mac renderer the same values |
 | Advanced controls and live changes | Settings file consumed by the running Windows renderer | Reuse the control protocol and implement its application in the Mac renderer without process restarts |
 | Stroke placement, tracing, relaxation, optical flow, texture, impasto | OpenGL 4.6 compute shaders in `shaders/` and `src/pipeline.cpp` | Port shaders and resource/synchronization logic to Metal; compare output and timing for every look |
 | GPU-generated stroke draw | OpenGL indirect draw in `src/pipeline.cpp` | Metal indirect draw/command buffer equivalent; check device feature support at runtime |
-| Single drag-and-drop TOX | Embedded Windows `.exe`, DLLs, GLSL shaders | Embed a signed/notarized Mac executable, libraries/frameworks, and Metal shader assets; use a Mac cache path and extraction permissions |
+| Single drag-and-drop TOX | Embedded Windows `.exe`, DLLs, GLSL shaders | Separate `Paintify-Mac.tox` package and installer; validate launch, extraction and signing on Mac |
 
 The existing renderer requests an OpenGL 4.6 context in `src/main.cpp`, uses GLSL 4.60 compute shaders, and routes live I/O through a Windows-only Spout implementation. Apple supports OpenGL only through 4.1 on macOS and recommends Metal. TouchDesigner's own Vulkan/MoltenVK renderer does not make the separate `gpu-sbr` executable's OpenGL 4.6 context available on Mac.
 
@@ -32,7 +36,7 @@ Syphon's Metal API can receive and publish `MTLTexture` frames. TouchDesigner's 
 5. Compare still frames against Windows for all five Looks and important Advanced settings; compare videos for temporal stability and test live input at multiple resolutions/FPS. Record acceptable visual tolerance and performance on actual Mac hardware.
 6. Package a separate macOS `Paintify.tox` with its native dependencies. Test it by dragging into a blank TouchDesigner project on a clean Mac. Verify code signing/notarization and first-run extraction/launch before calling it a one-file install.
 
-A separate Mac TOX is the lowest-risk release shape because a binary-only Windows TOX cannot run on macOS. The TouchDesigner UI can stay effectively the same. The main uncertainty is engineering and validation effort, especially shader equivalence and real-time performance; there is no tested Mac build in this repository today.
+A separate Mac TOX is necessary because a binary-only Windows TOX cannot run on macOS. The Mac Metal worker branch is maintained as that separate path. Compare output and measure performance on actual Mac hardware before making parity or throughput claims.
 
 ## Primary sources
 

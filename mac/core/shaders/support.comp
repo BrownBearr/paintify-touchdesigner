@@ -1,0 +1,75 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+#include "style.glsl"
+
+// brushkit surface.py: the support's micro-relief ("tooth") in 0..1. Built once
+// per size / support change. It feeds three things later: dry-brush strokes
+// only deposit on high tooth, watercolour granulates into low tooth, and the
+// finish pass relights it so the weave shows through thin paint.
+
+layout(r16f, binding = 0) uniform writeonly image2D uTooth;
+
+const float PI = 3.14159265;
+
+float canvasWeave(vec2 p, float thread, float irr) {
+    float wx = p.x + irr * thread * fbm(p / 60.0, 3, 101u);
+    float wy = p.y + irr * thread * fbm(p / 60.0 + vec2(7.1, -3.3), 3, 103u);
+    vec2 f = vec2(wx, wy) / thread;
+    vec2 i = floor(f);
+    vec2 fr = f - i;
+    bool over = mod(i.x + i.y, 2.0) < 0.5;          // warp over / weft over
+    float cx = pow(sin(PI * fr.x), 0.7);            // warp cross-section
+    float cy = pow(sin(PI * fr.y), 0.7);            // weft cross-section
+    // slubs: thickness varies along each individual thread
+    float slubW = 0.8 + 0.2 * vnoise(vec2(i.x * 13.7, p.y / (thread * 6.0)), 107u);
+    float slubF = 0.8 + 0.2 * vnoise(vec2(p.x / (thread * 6.0), i.y * 11.3 + 50.0), 109u);
+    float warpH = cx * slubW * (0.75 + 0.25 * sin(PI * fr.y));
+    float weftH = cy * slubF * (0.75 + 0.25 * sin(PI * fr.x));
+    float h = over ? max(warpH, 0.85 * weftH) : max(weftH, 0.85 * warpH);
+    h += 0.12 * fbm(p / 3.0, 2, 111u);
+    return clamp((h - 0.05) / 0.95, 0.0, 1.0);
+}
+
+float gessoPanel(vec2 p) {
+    float fine = 0.35 * fbm(p / 2.5, 2, 201u);
+    float streak = 0.4 * fbm(vec2(p.x / 120.0, p.y / 3.0), 3, 203u);
+    float grain = 0.25 * sin((p.y + 18.0 * fbm(vec2(p.x / 200.0, p.y / 40.0), 3, 205u)) / 5.0);
+    return clamp(0.5 + 0.6 * (fine + streak + grain), 0.0, 1.0);
+}
+
+float coldPress(vec2 p, float grain) {
+    uint id; vec2 fp;
+    float bumps = 1.0 - worley(p / grain, 301u, id, fp).x;
+    float fine = 0.5 * (1.0 - worley(p / (grain * 0.45) + 9.0, 303u, id, fp).x);
+    float fib = 0.35 * fbm(p / 1.5, 2, 305u);
+    return clamp((bumps + fine + fib - 0.35) / 1.25, 0.0, 1.0);
+}
+
+float washi(vec2 p) {
+    float base = 0.5 * fbm(p / 25.0, 4, 401u);
+    // long, nearly straight fibres running one way (the direction the pulp
+    // was drawn): ridges of noise stretched hard along that direction
+    float a = 0.3;
+    vec2 q = vec2(cos(a) * p.x + sin(a) * p.y, -sin(a) * p.x + cos(a) * p.y);
+    float fib = pow(1.0 - abs(gnoise(vec2(q.x / 60.0, q.y / 1.3), 403u)), 10.0);
+    fib += 0.6 * pow(1.0 - abs(gnoise(vec2(q.x / 45.0 + 7.0, q.y / 1.1), 405u)), 12.0);
+    return clamp(0.45 + base + 0.8 * fib, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= int(IMG_SIZE.x) || px.y >= int(IMG_SIZE.y)) return;
+    vec2 p = vec2(px) + 0.5;
+    float sc = max(ST_SUPPORT_SCALE, 0.25);
+    int kind = int(ST_SUPPORT + 0.5);
+    float t = 0.5;
+    if (kind == 1)      t = canvasWeave(p, 3.2 * sc, 0.35);   // canvas
+    else if (kind == 2) t = canvasWeave(p, 2.4 * sc, 0.35);   // linen
+    else if (kind == 3) t = canvasWeave(p, 5.0 * sc, 0.5);    // coarse canvas / burlap
+    else if (kind == 4) t = gessoPanel(p / sc);               // gesso panel
+    else if (kind == 5) t = coldPress(p, 7.0 * sc);           // watercolour paper
+    else if (kind == 6) t = washi(p / sc);                    // mulberry paper
+    imageStore(uTooth, px, vec4(t, 0.0, 0.0, 0.0));
+}

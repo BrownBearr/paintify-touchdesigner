@@ -1,0 +1,14 @@
+{
+  "first_shape": [
+    16,
+    32,
+    4
+  ],
+  "second_shape": [
+    16,
+    32,
+    4
+  ],
+  "retained": true,
+  "errors": ""
+}

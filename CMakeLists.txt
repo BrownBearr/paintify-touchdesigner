@@ -4,6 +4,11 @@ project(gpu-sbr LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(APPLE)
+    include(mac/CMakeLists.txt)
+    return()
+endif()
+
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -34,6 +39,11 @@ if(WIN32)
     target_link_libraries(paintify-spout-smoke PRIVATE glfw glad::glad Spout2::Spout)
     target_compile_definitions(paintify-spout-smoke PRIVATE NOMINMAX)
 endif()
+
+add_executable(live-resolution-test tests/live_resolution_test.cpp)
+target_include_directories(live-resolution-test PRIVATE src)
+enable_testing()
+add_test(NAME live-resolution COMMAND live-resolution-test)
 
 if(MSVC)
     target_compile_options(gpu-sbr PRIVATE /W3 /permissive- /utf-8)

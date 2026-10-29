@@ -33,9 +33,11 @@ struct GpuTimer {
     int cur = 0;
     bool started = false;
     bool issued[2] = {false, false};
+    bool enabled = true;
     double lastMs = 0.0;
 
     void init();
+    void setEnabled(bool on) { enabled = on; lastMs = 0.0; }
     void begin();
     void end();
     double ms() const { return lastMs; }

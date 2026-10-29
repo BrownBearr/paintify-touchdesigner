@@ -24,12 +24,14 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
     GLuint inputTexture = 0;
     int width = 0, height = 0;
     bool havePainting = false;
+    bool settingsDirty = false;
     bool announced = false;
     bool everConnected = false;
     unsigned long long paintedFrames = 0;
     auto lastConnected = std::chrono::steady_clock::now();
     RenderConfig currentRender = render;
     double targetFps = live.fps;
+    int maxDimension = live.maxDimension;
     auto interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / std::max(1.0, targetFps)));
     auto nextFrame = std::chrono::steady_clock::now();
@@ -47,10 +49,12 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
         }
-        if (live.reloadSettings && live.reloadSettings(params, currentRender, targetFps)) {
+        if (live.reloadSettings && live.reloadSettings(params, currentRender,
+                                                       targetFps, maxDimension)) {
             interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(1.0 / std::max(1.0, targetFps)));
             havePainting = false;
+            settingsDirty = true;
             pipe.resetTemporal();
         }
         // Advance from the previous deadline so scheduling jitter does not
@@ -100,21 +104,23 @@ int runLiveSpout(GLFWwindow* window, Pipeline& pipe, TuningParams params,
             sender.ReleaseSender();
             continue;
         }
-        if (!receiver.IsFrameNew()) continue;
+        const bool frameNew = receiver.IsFrameNew();
+        if (!frameNew && !settingsDirty) continue;
 
-        if (!pipe.setSourceTexture(inputTexture, width, height)) continue;
+        if (!pipe.setSourceTexture(inputTexture, width, height, maxDimension)) continue;
         pipe.render(params, currentRender, havePainting && params.frameDiffThreshold > 0.f);
         havePainting = true;
+        settingsDirty = false;
         params.frame += 1.f;
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT);
         // ReleaseSender clears Spout's configured name on input reconnect.
         sender.SetSenderName(live.outputName.c_str());
         if (!sender.SendTexture(pipe.canvasTexture(), GL_TEXTURE_2D,
-                                unsigned(width), unsigned(height))) {
+                                unsigned(pipe.width()), unsigned(pipe.height()))) {
             std::fprintf(stderr, "Spout failed to publish painted frame\n");
         } else if (++paintedFrames % 12 == 0) {
-            std::printf("Paintify live: %llu frames, %dx%d, GPU %.1f ms\n",
-                        paintedFrames, width, height, pipe.msTotal());
+            std::printf("Paintify live: %llu frames, %dx%d (GPU diagnostics disabled)\n",
+                        paintedFrames, pipe.width(), pipe.height());
             std::fflush(stdout);
         }
     }
