@@ -63,6 +63,12 @@ The rest of the repository is only needed to modify or rebuild Paintify.
 - [Standalone renderer (CLI and GUI), pipeline and measurements](docs/standalone-renderer.md)
 - [Architecture](docs/architecture.md)
 
+## License
+
+Paintify is MIT licensed; see [LICENSE](LICENSE). `Paintify.tox` bundles Spout2,
+Dear ImGui, GLFW, GLM, glad and stb under their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ---
 
 <sub>Demo footage: Chelsea the cat (Stefan van der Walt), CC0.</sub>
